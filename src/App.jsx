@@ -1212,19 +1212,10 @@ export default function App() {
   }, [rawVehicles, activeRegional]);
 
   const chamados = useMemo(() => {
-     if (activeRegional === 'Todas') return rawChamados;
-     const targetRegion = (activeRegional || '').toLowerCase();
-     const vehicleMap = new Map((rawVehicles || []).map(v => [(v.placa || '').trim().toUpperCase(), (v.regional || '').trim().toLowerCase()]));
-     
-     return rawChamados.filter(c => {
-       const plateKey = (c.placa || '').trim().toUpperCase();
-       const vehicleRegional = vehicleMap.get(plateKey);
-       if (vehicleRegional) {
-         return vehicleRegional === targetRegion;
-       }
-       return (c.regional || '').trim().toLowerCase() === targetRegion;
-     });
-  }, [rawChamados, rawVehicles, activeRegional]);
+     if (activeRegional === 'Todas' || activeRegional === 'Global') return rawChamados;
+     const targetRegion = (activeRegional || '').trim().toLowerCase();
+     return rawChamados.filter(c => (c.regional || '').trim().toLowerCase() === targetRegion);
+  }, [rawChamados, activeRegional]);
 
   const colaboradores = useMemo(() => {
      const normalized = (rawColaboradores || []).map(normalizeColaborador);
@@ -1269,6 +1260,7 @@ export default function App() {
         const { data: cData, error: cErr } = await supabase
           .from('chamados')
           .select('*')
+          .order('id', { ascending: false })
           .range(from, to);
         if (cErr) {
           console.warn('Aviso no carregamento de lote de chamados:', cErr);
@@ -2515,7 +2507,7 @@ export default function App() {
 
     const { tipoAcao, motivoRecusa, chamadoId, dataLiberacao, horaLiberacao, temPendencia, pendencia, defeitoPrincipal, isImpeditivo, numeroNovoChamado } = dadosLiberacao;
 
-    const chamadoOriginal = chamados.find(c => c.id === chamadoId);
+    const chamadoOriginal = (rawChamados || []).find(c => c.id === chamadoId) || chamados.find(c => c.id === chamadoId);
 
     if (!chamadoOriginal) return;
 
@@ -2628,7 +2620,7 @@ export default function App() {
 
     };
 
-    let novosChamados = chamados.map(c => c.id === chamadoId ? chamadoFinal : c);
+    let novosChamados = (rawChamados || []).map(c => c.id === chamadoId ? chamadoFinal : c);
 
 
 
@@ -2706,7 +2698,7 @@ export default function App() {
 
 
 
-    const vecOriginal = vehicles.find(v => v.placa === chamadoOriginal.placa);
+    const vecOriginal = (rawVehicles || []).find(v => v.placa === chamadoOriginal.placa);
 
     if (vecOriginal) {
 
@@ -10859,12 +10851,14 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   const [modalTransferenciaExternaOpen, setModalTransferenciaExternaOpen] = useState(false);
   const [oficinaDestinoExterna, setOficinaDestinoExterna] = useState('');
   const [motivoTransferenciaExterna, setMotivoTransferenciaExterna] = useState('');
+  const setorKey = normalizeKey(currentUser?.setor || '');
+  const perfilKey = normalizeKey(currentUser?.perfil || '');
   const setorNorm = (currentUser?.setor || '').trim().toUpperCase();
   const perfilNorm = (currentUser?.perfil || '').trim().toUpperCase();
-  const isCompras = setorNorm === 'COMPRAS';
-  const isFinanceiro = setorNorm === 'FINANCEIRO';
-  const isAdminOrGerente = ['ADMINISTRADOR', 'GERENTE'].includes(perfilNorm) || currentUser?.isAdmin === true;
-  const isCoord = perfilNorm === 'COORDENADOR';
+  const isCompras = setorKey === 'COMPRAS' || setorNorm === 'COMPRAS';
+  const isFinanceiro = setorKey === 'FINANCEIRO' || setorNorm === 'FINANCEIRO';
+  const isAdminOrGerente = ['ADMINISTRADOR', 'ADMIN', 'GERENTE', 'GERENCIA', 'DIRETOR', 'DIRETORIA'].some(p => perfilKey.includes(p)) || currentUser?.isAdmin === true;
+  const isCoord = perfilKey.includes('COORDENAD') || perfilNorm === 'COORDENADOR';
   const subFluxo = formData.dadosWorkflow?.subFluxoOficina;
 
   const [transitionComment, setTransitionComment] = useState('');
@@ -11078,17 +11072,18 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
 
   // Membro da Frota (Setor Frota, Perfil Frota/Mecânico, ou Administrador)
-  const isFrota = setorNorm === 'FROTA' || perfilNorm === 'FROTA' || perfilNorm === 'MECANICO' || isAdminOrGerente;
+  const isFrota = setorKey === 'FROTA' || perfilKey === 'FROTA' || perfilKey === 'MECANICO' || isAdminOrGerente;
 
   // Permissões granulares de manutenção e movimentação
   const podeConcluirOficina = userPermissions?.permissoes_edicao?.pode_concluir_chamado_oficina === true || isFrota || isCoord;
   const podeMovimentarOficinas = userPermissions?.permissoes_edicao?.pode_movimentar_oficinas === true || isFrota || isCoord;
 
-  // Compliance estrito: Apenas a OPERAÇÃO (Supervisor, Coordenador, Analista de Operação), Gerente ou Administrador pode desequipar e aceitar o veículo
+  // Compliance estrito: Apenas a OPERAÇÃO (Supervisor, Coordenador, Analista de Operação, Gerente, Administrador), Gerente ou Administrador pode desequipar e aceitar o veículo
   // Usuários do setor FROTA NÃO podem confirmar desequipagem nem aprovar/aceitar o veículo final
-  const isOperacaoParaDesequipar = (setorNorm === 'OPERACOES' || setorNorm === 'OPERAÇÃO' || !setorNorm) && perfilNorm !== 'FROTA' && perfilNorm !== 'MECANICO'
-    ? ['SUPERVISOR', 'COORDENADOR', 'GERENTE', 'ADMINISTRADOR', 'ANALISTA'].includes(perfilNorm)
-    : (isAdminOrGerente || (isCoord && setorNorm !== 'FROTA'));
+  const isSetorOperacao = setorKey.includes('OPERAC') || !currentUser?.setor;
+  const isPerfilOperacao = ['SUPERVISOR', 'SUPERVISAO', 'COORDENADOR', 'COORDENACAO', 'GERENTE', 'GERENCIA', 'ADMINISTRADOR', 'ADMIN', 'ANALISTA', 'LIDER', 'ENCARREGADO', 'DIRETOR', 'DIRETORIA'].some(p => perfilKey.includes(p)) || currentUser?.isAdmin === true;
+  const isOperacaoParaDesequipar = (isSetorOperacao && isPerfilOperacao && perfilKey !== 'FROTA' && perfilKey !== 'MECANICO')
+    || (isAdminOrGerente || (isCoord && setorKey !== 'FROTA'));
 
   const isOperacaoParaAceite = isOperacaoParaDesequipar;
 

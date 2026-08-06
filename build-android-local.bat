@@ -20,10 +20,10 @@ if %errorlevel% neq 0 (
 )
 
 echo ==============================================================================
-echo [3/3] Compilando APK via Gradle...
+echo [3/3] Compilando APK Release Oficial (Assinado) via Gradle...
 echo ==============================================================================
 cd android
-call gradlew.bat assembleDebug
+call gradlew.bat assembleRelease
 if %errorlevel% neq 0 (
     echo [AVISO] Se o build falhar por falta de JDK 17/Android SDK local,
     echo abra a pasta 'android' no Android Studio e clique em 'Build > Build APK(s)'.
@@ -34,7 +34,7 @@ if %errorlevel% neq 0 (
 cd ..
 
 echo ==============================================================================
-echo [SUCESSO] APK gerado com sucesso em:
-echo android\app\build\outputs\apk\debug\app-debug.apk
+echo [SUCESSO] APK Release Assinado gerado com sucesso em:
+echo android\app\build\outputs\apk\release\app-release.apk
 echo ==============================================================================
 pause
