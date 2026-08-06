@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Controle Operacional</string>
+    <string name="title_activity_main">Controle Operacional</string>
+    <string name="package_name">com.alpitel.controleoperacional</string>
+    <string name="custom_url_scheme">com.alpitel.controleoperacional</string>
+</resources>

@@ -1,0 +1,517 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .animate-in {
+    animation: animate-in 0.3s ease-out;
+  }
+  .fade-in {
+    animation-name: fadeIn;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* Utilitário para ocultar scrollbar no Windows/Chrome/Edge/Firefox/IE */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+
+  /* Scrollbar ultrafina e premium para a sidebar expandida */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #cbd5e1; /* slate-300 */
+    border-radius: 9999px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8; /* slate-400 */
+  }
+}
+
+/* ============================================================================
+   LIGHT-DARK MODE STYLING OVERRIDES & TRANSITIONS
+   ============================================================================ */
+
+/* Root dark class background & text */
+.dark {
+  background-color: #020813 !important;
+  color: #f8fafc !important;
+}
+
+/* CSS transition transitions for a premium interface feeling */
+.dark body, 
+.dark div, 
+.dark aside, 
+.dark main, 
+.dark header, 
+.dark section, 
+.dark table, 
+.dark tr, 
+.dark td, 
+.dark th, 
+.dark input, 
+.dark select, 
+.dark textarea, 
+.dark button, 
+.dark span, 
+.dark p, 
+.dark h1, 
+.dark h2, 
+.dark h3, 
+.dark h4, 
+.dark h5, 
+.dark h6 {
+  transition: background-color 0.2s ease-in-out, 
+              border-color 0.2s ease-in-out, 
+              color 0.2s ease-in-out, 
+              box-shadow 0.2s ease-in-out;
+}
+
+/* Background resets */
+.dark .bg-\[\#F5F3FF\] {
+  background-color: #020813 !important;
+}
+.dark .bg-white {
+  background-color: #0b101d !important;
+}
+.dark .bg-white\/80 {
+  background-color: rgba(11, 16, 29, 0.8) !important;
+}
+.dark .bg-slate-50 {
+  background-color: #070b14 !important;
+}
+.dark .bg-slate-100 {
+  background-color: #1e293b !important;
+}
+.dark .bg-slate-200 {
+  background-color: #334155 !important;
+}
+.dark .bg-slate-900\/40 {
+  background-color: rgba(15, 23, 42, 0.4) !important;
+}
+.dark .bg-slate-950\/40 {
+  background-color: rgba(2, 6, 23, 0.4) !important;
+}
+
+/* Border overrides */
+.dark .border-emerald-50,
+.dark .border-emerald-100,
+.dark .border-emerald-100\/50,
+.dark .border-slate-50,
+.dark .border-slate-100,
+.dark .border-slate-200 {
+  border-color: #1e293b !important;
+}
+
+/* Text colors */
+.dark .text-blue-950,
+.dark .text-slate-950,
+.dark .text-slate-900,
+.dark .text-slate-800 {
+  color: #f8fafc !important;
+}
+.dark .text-slate-700 {
+  color: #f1f5f9 !important;
+}
+.dark .text-slate-650 {
+  color: #e2e8f0 !important;
+}
+.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+.dark .text-slate-500 {
+  color: #cbd5e1 !important;
+}
+.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+/* Active Sidebar Navigation Item overrides */
+.dark .bg-emerald-100\/80 {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+}
+.dark .text-emerald-700 {
+  color: #34d399 !important;
+}
+.dark .hover\:bg-slate-50:hover {
+  background-color: rgba(30, 41, 59, 0.5) !important;
+}
+.dark .hover\:bg-slate-100:hover {
+  background-color: rgba(51, 65, 85, 0.5) !important;
+}
+
+/* Form Inputs, Select & Dialog controllers */
+.dark input, 
+.dark select, 
+.dark textarea {
+  background-color: #070b14 !important;
+  color: #f8fafc !important;
+  border-color: #1e293b !important;
+}
+.dark input:disabled, 
+.dark select:disabled {
+  background-color: #0b101d !important;
+  opacity: 0.65;
+}
+.dark input::placeholder {
+  color: #475569 !important;
+}
+
+/* Pastel KPI background conversion to transparent glows */
+.dark .bg-blue-50 {
+  background-color: rgba(59, 130, 246, 0.08) !important;
+  border-color: rgba(59, 130, 246, 0.15) !important;
+}
+.dark .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.08) !important;
+  border-color: rgba(16, 185, 129, 0.15) !important;
+}
+.dark .bg-rose-50 {
+  background-color: rgba(239, 68, 68, 0.08) !important;
+  border-color: rgba(239, 68, 68, 0.15) !important;
+}
+.dark .bg-amber-50 {
+  background-color: rgba(245, 158, 11, 0.08) !important;
+  border-color: rgba(245, 158, 11, 0.15) !important;
+}
+
+/* Rich KPI text corrections */
+.dark .text-blue-900 {
+  color: #60a5fa !important;
+}
+.dark .text-emerald-800,
+.dark .text-emerald-600 {
+  color: #34d399 !important;
+}
+.dark .text-rose-600,
+.dark .text-rose-800 {
+  color: #f87171 !important;
+}
+.dark .text-amber-800 {
+  color: #fbbf24 !important;
+}
+
+/* Hover transitions on table rows */
+.dark .hover\:bg-slate-50:hover {
+  background-color: #0d1220 !important;
+}
+
+/* Custom Scrollbars in Dark Mode */
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155 !important;
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #475569 !important;
+}
+
+/* Recharts Dark Tooltip overrides */
+.dark .recharts-default-tooltip {
+  background-color: #0b101d !important;
+  border-color: #1e293b !important;
+}
+.dark .recharts-tooltip-item {
+  color: #cbd5e1 !important;
+}
+.dark .recharts-tooltip-label {
+  color: #f8fafc !important;
+}
+
+/* Specific opacity background overrides for tables and badges */
+.dark .bg-blue-50\/70 {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+}
+.dark .border-blue-100 {
+  border-color: rgba(59, 130, 246, 0.25) !important;
+}
+.dark .bg-slate-200\/50 {
+  background-color: rgba(51, 65, 85, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+.dark .bg-slate-50\/50 {
+  background-color: rgba(15, 23, 42, 0.25) !important;
+}
+.dark .bg-slate-100\/80 {
+  background-color: rgba(51, 65, 85, 0.35) !important;
+}
+.dark .bg-emerald-50\/60 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+}
+.dark .bg-emerald-100\/30 {
+  background-color: rgba(16, 185, 129, 0.2) !important;
+}
+.dark .bg-rose-50\/60 {
+  background-color: rgba(239, 68, 68, 0.12) !important;
+}
+.dark .bg-rose-100\/30 {
+  background-color: rgba(239, 68, 68, 0.2) !important;
+}
+
+/* Specific text colors for table values */
+.dark .text-emerald-700 {
+  color: #34d399 !important;
+}
+.dark .text-rose-700 {
+  color: #f87171 !important;
+}
+.dark .text-indigo-700 {
+  color: #818cf8 !important;
+}
+
+/* ============================================================================
+   MOBILE PWA DESIGN SYSTEM — Material Design 3 Expressive + Apple Liquid Glass
+   ============================================================================ */
+
+/* Safe areas for iPhone notch / Dynamic Island */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Glassmorphism — Apple Liquid Glass */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+.dark .glass {
+  background: rgba(11, 16, 29, 0.78);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06), 
+              0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.dark .glass-card {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Bottom Navigation Bar */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  padding-bottom: var(--safe-bottom);
+}
+
+/* Mobile Top Bar */
+.mobile-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  padding-top: var(--safe-top);
+}
+
+/* Material 3 Pill Indicator */
+.nav-pill {
+  transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+.nav-pill-active {
+  background: rgba(16, 185, 129, 0.14);
+  border-radius: 16px;
+  padding: 4px 20px;
+}
+
+/* Ripple Touch Effect */
+.ripple {
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+.ripple::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), 
+              rgba(0, 0, 0, 0.06) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.4s ease-out;
+  pointer-events: none;
+}
+.ripple:active::after {
+  opacity: 1;
+  transition: opacity 0.1s ease-in;
+}
+
+/* Touch-optimized targets — 48px minimum (Material Guidelines) */
+@media (max-width: 768px) {
+  .touch-target {
+    min-height: 48px;
+    min-width: 48px;
+  }
+
+  /* Prevent auto-zoom on input focus (iOS) */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+
+  /* Smooth native scrolling */
+  .mobile-scroll {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    scroll-behavior: smooth;
+  }
+
+  /* Full-screen mobile modal */
+  .mobile-fullscreen-modal {
+    position: fixed !important;
+    inset: 0 !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Mobile card with press feedback */
+  .mobile-card-press {
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .mobile-card-press:active {
+    transform: scale(0.97);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Hide desktop sidebar on mobile */
+  .desktop-sidebar {
+    display: none !important;
+  }
+
+  /* Full-width mobile content */
+  .mobile-content {
+    padding-left: var(--safe-left) !important;
+    padding-right: var(--safe-right) !important;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .tablet-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* PWA standalone mode adjustments */
+@media (display-mode: standalone) {
+  body {
+    overscroll-behavior-y: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  
+  /* Prevent pull-to-refresh on PWA */
+  html {
+    overscroll-behavior: none;
+  }
+}
+
+/* Mobile-specific scrollbar hide */
+@media (max-width: 1024px) {
+  .mobile-no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .mobile-no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Progress bar for mobile wizard */
+.mobile-progress-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(16, 185, 129, 0.15);
+  overflow: hidden;
+}
+.mobile-progress-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #059669, #14b8a6);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Mobile floating action button */
+.mobile-fab {
+  position: fixed;
+  right: 20px;
+  bottom: calc(88px + var(--safe-bottom));
+  z-index: 45;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 20px rgba(5, 150, 105, 0.35),
+              0 2px 6px rgba(5, 150, 105, 0.2);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.mobile-fab:active {
+  transform: scale(0.92);
+}
+
+/* Bottom sheet overlay */
+.bottom-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 60;
+  animation: fadeInOverlay 0.2s ease;
+}
+.bottom-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 61;
+  border-radius: 24px 24px 0 0;
+  padding-bottom: var(--safe-bottom);
+  animation: slideUpSheet 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+@keyframes fadeInOverlay {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUpSheet {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(30px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes mobilePageIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mobile-page-enter {
+  animation: mobilePageIn 0.3s ease-out;
+}
+
