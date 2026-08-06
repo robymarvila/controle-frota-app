@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { supabase } from '../supabaseClient';
 import { gpsService } from '../services/gpsService';
+import { notificationService } from '../services/notificationService';
 
 import * as XLSX from 'xlsx';
 
@@ -6637,9 +6638,8 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
   // ── UI States
 
   const [showShiftModal, setShowShiftModal] = useState(false);
-
   const [modalPlaca, setModalPlaca] = useState('');
-
+  const [hasConfirmedGpsPerm, setHasConfirmedGpsPerm] = useState(false);
   const [filterDate, setFilterDate] = useState('');
 
   const [viewMode, setViewMode] = useState('lista'); // 'lista' | 'card' | 'base'
@@ -6771,9 +6771,34 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
   };
 
   useEffect(() => {
-
     fetchShiftAndPref();
+    notificationService.init();
 
+    // ── Escuta Realtime para novas OS atribuídas a este inspetor
+    const auditorLogin = currentUser?.login || currentUser?.nome;
+    if (auditorLogin) {
+      const channel = supabase
+        .channel(`rt-os-notif-${auditorLogin}`)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'wfm_tarefas', filter: `auditor=eq.${auditorLogin}` },
+          (payload) => {
+            console.log('[Realtime OS] Nova tarefa inserida:', payload);
+            notificationService.notifyNewTask({
+              id: payload.new?.id,
+              title: payload.new?.titulo || 'Nova Ordem de Serviço',
+              description: payload.new?.descricao || `OS atribuída: ${payload.new?.os_numero || ''}`,
+              osNumber: payload.new?.os_numero,
+              auditor: auditorLogin,
+            });
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
   }, [currentUser]);
 
   // ── Live GPS Tracker Unificado (Nativo Android Foreground Service no APK + Contingência PWA no Web)
@@ -6783,7 +6808,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
       return;
     }
 
-    // Inicia rastreamento contínuo
+    // Inicia rastreamento contínuo com motor duplo (deslocamento + heartbeat 30s)
     gpsService.startTracking(shift, (pos) => {
       // Callback opcional de atualização em tempo real
     });
@@ -8194,47 +8219,75 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
             </div>
 
             <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-
-              Para iniciar seu turno de trabalho, informe a placa do veículo que utilizará hoje e autorize o uso do GPS do seu dispositivo.
-
+              Para iniciar seu turno de trabalho, informe a placa do veículo e confirme as permissões para rastreamento em tempo real.
             </p>
 
-            <div className="space-y-4 flex-1 overflow-y-auto">
-
+            <div className="space-y-4 flex-1 overflow-y-auto pr-1">
               <div>
-
                 <label className="block text-[9px] font-black uppercase text-slate-400 mb-1 tracking-wider">Placa do Veículo</label>
-
                 <input
-
                   type="text"
-
                   value={modalPlaca}
-
                   onChange={e => setModalPlaca(e.target.value.toUpperCase())}
-
                   placeholder="ABC-1234"
-
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-800 text-center text-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all uppercase tracking-wider"
-
                   maxLength={8}
-
                 />
-
               </div>
 
+              {/* ── CARD DE CONFORMIDADE OBRIGATÓRIA ANDROID ── */}
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 text-left space-y-3">
+                <div className="flex items-center gap-2 text-amber-900 font-black text-xs uppercase tracking-wide">
+                  <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+                  <span>Requisitos para Telemetria Contínua</span>
+                </div>
+
+                <div className="text-[11px] text-amber-950 space-y-2 leading-tight">
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-600 font-black">1.</span>
+                    <p><strong>Localização:</strong> Selecione <span className="bg-amber-200/70 px-1 py-0.5 rounded font-black text-amber-950">"Permitir o tempo todo"</span> para manter o envio com tela apagada.</p>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-600 font-black">2.</span>
+                    <p><strong>Bateria:</strong> Defina como <span className="bg-amber-200/70 px-1 py-0.5 rounded font-black text-amber-950">"Sem Restrições"</span> (Não Otimizar).</p>
+                  </div>
+                </div>
+
+                {gpsService.isNative() && (
+                  <button
+                    type="button"
+                    onClick={() => gpsService.openSettings()}
+                    className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] rounded-xl uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                  >
+                    <Zap size={14} /> Abrir Configurações do Android
+                  </button>
+                )}
+              </div>
+
+              {/* ── CHECKBOX DE CONFIRMAÇÃO OBRIGATÓRIO ── */}
+              <label className="flex items-start gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer select-none text-left">
+                <input
+                  type="checkbox"
+                  checked={hasConfirmedGpsPerm}
+                  onChange={e => setHasConfirmedGpsPerm(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                />
+                <span className="text-[11px] text-slate-700 font-medium leading-tight">
+                  Confirmo que configurei a localização para <strong>"O tempo todo"</strong> e a bateria <strong>"Sem restrições"</strong>.
+                </span>
+              </label>
             </div>
 
             <button
-
               onClick={handleStartShiftSubmit}
-
-              className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl shadow-md transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95"
-
+              disabled={!modalPlaca.trim() || !hasConfirmedGpsPerm}
+              className={`mt-4 w-full font-black py-3 rounded-xl shadow-md transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 ${
+                modalPlaca.trim() && hasConfirmedGpsPerm
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-blue-500/20'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              }`}
             >
-
               AUTORIZAR E INICIAR <Check size={16} />
-
             </button>
 
           </div>
