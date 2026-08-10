@@ -55,6 +55,7 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
 
   // Auditor results
   const auditorName = os.auditor || matchedFa.auditor || matchedWf.auditor || '';
+  const respostas = rawDataPayload.respostas || rawDataPayload.respostas_campo || os.payload_dados?.respostas || matchedFa.payload_dados?.respostas || matchedFa.answers || (os.respostas && typeof os.respostas === 'object' ? os.respostas : null);
   const status = os.status || matchedFa.status || matchedWf.status || matchedOrdem.status_fisc || 'pendente';
   // Photos collection: combine audit photos, general ticket photos, and defect-specific photos
   const fotosGeraisObj = os.dadosWorkflow?.fotosChamado || os.fotosChamado || {};
@@ -351,7 +352,7 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
           )}
 
           {/* Render Answers of Auditor if completed */}
-          {respostas && (
+          {respostas && typeof respostas === "object" && Object.keys(respostas).length > 0 && (
             <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm space-y-3">
               <h4 className="font-black text-emerald-700 text-sm border-b pb-1">Coletas de Campo do Auditor</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
