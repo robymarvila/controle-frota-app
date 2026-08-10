@@ -18127,6 +18127,7 @@ function AutoScrollingContainer({ children, className, listLength }) {
 
 
 function PainelTVView({ vehicles, chamados, activeRegional, setActiveRegional, currentUser, onVoltar }) {
+  const vehiclesMap = useMemo(() => new Map((vehicles || []).map(v => [v.placa, v])), [vehicles]);
 
   const [time, setTime] = useState(new Date());
 
