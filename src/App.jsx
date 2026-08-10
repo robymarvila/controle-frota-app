@@ -10479,6 +10479,41 @@ function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
 
 
 
+    const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filtered.slice(start, start + itemsPerPage);
+  }, [filtered, currentPage]);
+
+  const renderPaginationBar = () => (
+    <div className="flex flex-col sm:flex-row items-center justify-between bg-white px-6 py-3.5 rounded-2xl border border-slate-200 shadow-sm text-xs font-bold text-slate-600 gap-3 my-4">
+      <span>
+        Mostrando {filtered.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, filtered.length)} de {filtered.length} chamados
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={currentPage === 1}
+          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+          className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed font-black transition-all text-slate-700 active:scale-95 cursor-pointer"
+        >
+          Anterior
+        </button>
+        <span className="px-3.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-800">
+          Página {currentPage} de {totalPages}
+        </span>
+        <button
+          type="button"
+          disabled={currentPage >= totalPages}
+          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+          className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed font-black transition-all text-slate-700 active:scale-95 cursor-pointer"
+        >
+          Próxima
+        </button>
+      </div>
+    </div>
+  );
+
   return (
 
     <div className="max-w-7xl mx-auto animate-in fade-in duration-300">
