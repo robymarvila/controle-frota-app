@@ -244,7 +244,41 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">• Categoria: {categoria}</span>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-full transition-colors text-white/70 hover:text-white"><X size={22} /></button>
+          <div className="flex items-center gap-2">
+            {auditorName && status !== 'completed' && status !== 'concluido' && (
+              <button
+                onClick={async () => {
+                  if (confirm(`Deseja devolver a OS ${osId} para a Base de Origem (${base})?`)) {
+                    const logMsg = `OS Devolvida Manualmente para a Base de Origem (${base})`;
+                    await supabase.from('wfm_tarefas').update({
+                      auditor: null,
+                      assigned_date: null,
+                      planned_start: null,
+                      planned_end: null,
+                      status: 'pending',
+                      historico: [
+                        ...(os.historico || []),
+                        { acao: 'WFM_DESALOCACAO', usuario: 'Operador', timestamp: new Date().toISOString(), observacao: logMsg }
+                      ]
+                    }).or(`os_numero.eq.${osId},id_origem.eq.${osId},id.eq.${os.id || ''}`);
+
+                    await supabase.from('autofiscalizacao_workflows').update({
+                      auditor: null,
+                      status: 'pendente'
+                    }).eq('osid', osId);
+
+                    alert(`OS ${osId} devolvida com sucesso para a ${base}!`);
+                    onClose();
+                    if (window.location) window.location.reload();
+                  }
+                }}
+                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-[10px] rounded-xl uppercase tracking-wider shadow-sm flex items-center gap-1.5 active:scale-95 transition-all"
+              >
+                <RotateCcw size={14} /> Devolver para {base}
+              </button>
+            )}
+            <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-full transition-colors text-white/70 hover:text-white"><X size={22} /></button>
+          </div>
         </div>
 
         {/* Content */}

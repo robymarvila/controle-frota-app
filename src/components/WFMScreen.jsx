@@ -2264,7 +2264,7 @@ export default function WFMScreen({
 
                                     className={`bg-white border rounded-2xl p-4 shadow-sm cursor-grab hover:border-blue-400 hover:shadow-md transition-all duration-200 group flex flex-col justify-between
 
-                                      ${isChecked ? 'border-blue-500 ring-2 ring-blue-500/10' : 'border-slate-200/80'}
+                                      ${isChecked ? 'border-blue-500 ring-2 ring-blue-500/10' : (fa.status === 'pending' || fa.status === 'pendente' || !fa.auditor ? 'border-2 border-amber-500 bg-amber-50/20 shadow-md shadow-amber-500/10' : 'border-slate-200/80')}
 
                                     `}
 
@@ -2328,7 +2328,7 @@ export default function WFMScreen({
 
                                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{fa.categoria || 'AutoFiscalização'}</span>
 
-                                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${fa.auditor ? 'text-blue-600 bg-blue-50 border-blue-100' : 'text-amber-600 bg-amber-50 border-amber-100'}`}>
+                                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${fa.auditor ? 'text-blue-600 bg-blue-50 border-blue-100' : 'text-amber-800 bg-amber-100 border-amber-300 font-black'}`}>
 
                                           {fa.auditor ? `Alocado (${fa.auditor})` : 'Não Alocado'}
 

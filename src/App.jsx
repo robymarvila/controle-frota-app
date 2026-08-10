@@ -801,6 +801,83 @@ const DEFAULT_CONFIG_ACESSOS = [
 
 export default function App() {
 
+  // Rotina Automática de Sobras de Campo (23:59) respeitando o calendário/escala do auditor
+  useEffect(() => {
+    const processSobrasAt2359 = async () => {
+      try {
+        const todayStr = new Date().toLocaleDateString('en-CA');
+        const { data: activeTasks } = await supabase
+          .from('wfm_tarefas')
+          .select('*')
+          .not('auditor', 'is', null)
+          .neq('auditor', '')
+          .neq('status', 'completed')
+          .neq('status', 'concluida');
+
+        if (!activeTasks || activeTasks.length === 0) return;
+
+        const { data: shifts } = await supabase.from('autofiscalizacao_shifts').select('*').eq('date', todayStr);
+        const activeShiftsMap = new Map((shifts || []).map(s => [s.auditor, s]));
+
+        for (const task of activeTasks) {
+          const auditor = task.auditor;
+          const shift = activeShiftsMap.get(auditor);
+          let isOvernightActive = false;
+
+          if (shift && shift.shift_start && shift.shift_end) {
+            const startH = parseInt(shift.shift_start.split(':')[0], 10);
+            const endH = parseInt(shift.shift_end.split(':')[0], 10);
+            if (endH < startH && !shift.end_time) {
+              isOvernightActive = true; // Turno noturno ativo
+            }
+          }
+
+          if (!isOvernightActive) {
+            const base = task.payload_dados?.base || task.base || 'Base de Origem';
+            const nowIso = new Date().toISOString();
+
+            await supabase.from('wfm_tarefas').update({
+              auditor: null,
+              assigned_date: null,
+              planned_start: null,
+              planned_end: null,
+              status: 'pending',
+              historico: [
+                ...(task.historico || []),
+                {
+                  acao: 'SOBRA_CAMPO',
+                  usuario: 'Sistema (23:59)',
+                  timestamp: nowIso,
+                  observacao: `Sobra de Campo: OS Devolvida para o Bucket da Base de Origem (${base}) na virada do dia`
+                }
+              ]
+            }).eq('id', task.id);
+
+            if (task.id_origem) {
+              try {
+                await supabase.from('autofiscalizacao_workflows').update({ auditor: null, status: 'pendente' }).eq('inspid', task.id_origem);
+              } catch (e) {}
+            }
+            console.log(`[Sobras 23:59] OS ${task.payload_dados?.osid || task.id} devolvida para a ${base}`);
+          }
+        }
+      } catch (err) {
+        console.warn('[Sobras 23:59] Erro ao processar sobras:', err);
+      }
+    };
+
+    // Executa a verificação a cada 5 minutos
+    const intervalId = setInterval(() => {
+      const now = new Date();
+      if (now.getHours() === 23 && now.getMinutes() >= 58) {
+        processSobrasAt2359();
+      }
+    }, 300000);
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+
   const urlParams = new URLSearchParams(window.location.search);
   const checkinId = urlParams.get('checkin');
   const laudosPlaca = urlParams.get('laudos');
