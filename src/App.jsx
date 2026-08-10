@@ -10956,6 +10956,9 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
             setFormData(prev => ({
               ...prev,
               ...data,
+              hodometro: data.dadosWorkflow?.hodometro || data.hodometro || prev.hodometro || '',
+              fotosChamado: data.dadosWorkflow?.fotosChamado || data.fotosChamado || prev.fotosChamado || {},
+              dataAbertura: formatToDatetimeLocal(data.dataAbertura || prev.dataAbertura),
               dadosWorkflow: data.dadosWorkflow || prev.dadosWorkflow || {},
               historicoModificacoes: data.historicoModificacoes || prev.historicoModificacoes || []
             }));
