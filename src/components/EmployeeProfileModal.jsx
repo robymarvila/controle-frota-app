@@ -6,6 +6,17 @@ export default function EmployeeProfileModal({ isOpen, onClose, employee, onSave
   const [showPassword, setShowPassword] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  const canEditDirectly = React.useMemo(() => {
+    const perfilUpper = String(currentUser?.perfil || '').trim().toUpperCase();
+    const cargoUpper = String(currentUser?.cargo || '').trim().toUpperCase();
+    const allowed = ['COORDENADOR', 'GERENTE', 'ADMINISTRADOR', 'ADMIN'];
+    return (
+      allowed.includes(perfilUpper) ||
+      allowed.includes(cargoUpper) ||
+      currentUser?.isAdmin === true
+    );
+  }, [currentUser]);
+
   useEffect(() => {
     if (employee) {
       setFormData({ ...employee });
@@ -63,16 +74,7 @@ export default function EmployeeProfileModal({ isOpen, onClose, employee, onSave
     setShowPassword(!showPassword);
   };
 
-  const canEditDirectly = React.useMemo(() => {
-    const perfilUpper = String(currentUser?.perfil || '').trim().toUpperCase();
-    const cargoUpper = String(currentUser?.cargo || '').trim().toUpperCase();
-    const allowed = ['COORDENADOR', 'GERENTE', 'ADMINISTRADOR', 'ADMIN'];
-    return (
-      allowed.includes(perfilUpper) ||
-      allowed.includes(cargoUpper) ||
-      currentUser?.isAdmin === true
-    );
-  }, [currentUser]);
+
 
   const handleSave = () => {
     if (!canEditDirectly) {
