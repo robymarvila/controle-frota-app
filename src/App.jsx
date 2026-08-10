@@ -5879,6 +5879,8 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
   const [oficinaFiltroTipo, setOficinaFiltroTipo] = useState('todos');
   const [oficinaFiltroTipoOp, setOficinaFiltroTipoOp] = useState('todos');
 
+  const vehiclesMap = useMemo(() => new Map((vehicles || []).map(v => [v.placa, v])), [vehicles]);
+
 
 
   useEffect(() => {
