@@ -10901,6 +10901,27 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
   const podeAlterarEtapaManual = userPermissions?.permissoes_edicao?.pode_alterar_etapa_manual === true || (currentUser?.perfil || '').toUpperCase() === 'ADMINISTRADOR' || currentUser?.isAdmin === true;
 
+  // Buscador de 100% dos detalhes sob demanda (fotos, historico, comentarios, workflows) ao abrir o chamado
+  useEffect(() => {
+    if (chamadoEdicao && chamadoEdicao.id) {
+      supabase
+        .from('chamados')
+        .select('*')
+        .eq('id', chamadoEdicao.id)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (data && !error) {
+            setFormData(prev => ({
+              ...prev,
+              ...data,
+              dadosWorkflow: data.dadosWorkflow || prev.dadosWorkflow || {},
+              historicoModificacoes: data.historicoModificacoes || prev.historicoModificacoes || []
+            }));
+          }
+        });
+    }
+  }, [chamadoEdicao]);
+
   const [formData, setFormData] = useState(() => {
 
     if (chamadoEdicao) {
