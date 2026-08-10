@@ -87,6 +87,10 @@ class GpsService {
   /**
    * Verifica estritamente se a localização está "O tempo todo" no Android
    */
+  async checkAlwaysPermission() {
+    return await this.checkStrictPermission();
+  }
+
   async checkStrictPermission() {
     if (!this.isNative()) return true; // Na web não há "O tempo todo"
     try {

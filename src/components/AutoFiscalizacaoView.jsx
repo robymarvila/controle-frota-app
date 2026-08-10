@@ -7432,7 +7432,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
 
   return (
 
-    <div className="flex-grow flex flex-col bg-slate-50 relative pb-20 font-sans min-h-screen overflow-y-auto">
+    <div className="flex-grow flex flex-col bg-slate-50 relative pb-24 font-sans min-h-screen overflow-y-auto" style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}>
 
       {/* ─── TAB 1: DASHBOARD / STATISTICS ─── */}
 
@@ -7694,7 +7694,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
                           href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`} 
                           target="_blank" 
                           rel="noopener noreferrer" 
-                          className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] uppercase font-black tracking-wider text-center py-2 rounded-lg flex items-center justify-center gap-1.5 mt-1 transition-colors"
+                          className="bg-emerald-600 hover:bg-emerald-700 !text-white text-white text-[10px] uppercase font-black tracking-wider text-center py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 mt-1.5 shadow-md shadow-emerald-600/20 transition-all active:scale-95"
                         >
                           <MapIcon size={12} /> Ir ao Endereço
                         </a>
@@ -8172,47 +8172,44 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
         </div>
       )}
 
-      {/* ─── BOTTOM NAVIGATION BAR (Instagram / WhatsApp Style) ─── */}
+      {/* ─── BOTTOM NAVIGATION BAR (Liquid Glass Esmeralda Apple Style) ─── */}/
       <div 
-        className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200/80 flex items-center justify-around px-2 z-40 shadow-lg shrink-0 select-none"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)', height: 'calc(64px + env(safe-area-inset-bottom))' }}
+        className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200/80 flex items-center justify-around px-2 z-40 shadow-2xl shrink-0 select-none"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)', height: 'calc(66px + env(safe-area-inset-bottom))' }}
       >
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'dashboard' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
-        >
-          <BarChart3 size={20} />
-          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Painel</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('timeline')}
-          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'timeline' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
-        >
-          <Clock size={20} />
-          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Agenda</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('ponto')}
-          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'ponto' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all relative`}
-        >
-          {activeTab === 'ponto' && <div className="absolute top-0 w-8 h-1 bg-emerald-500 rounded-b-full"></div>}
-          <Contact size={20} />
-          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Ponto</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('map')}
-          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'map' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
-        >
-          <MapIcon size={20} />
-          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Mapa</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('profile')}
-          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'profile' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
-        >
-          <User size={20} />
-          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Perfil</span>
-        </button>
+        {[
+          { id: 'ponto', label: 'PONTO', icon: Clock },
+          { id: 'timeline', label: 'AGENDA', icon: Calendar },
+          { id: 'map', label: 'MAPA', icon: MapPin },
+          { id: 'dashboard', label: 'PAINEL', icon: BarChart3 },
+          { id: 'profile', label: 'PERFIL', icon: User }
+        ].map(item => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={"flex flex-col items-center justify-center h-full flex-1 transition-all duration-300 relative py-1 " + (
+                isActive 
+                  ? 'scale-105' 
+                  : 'text-slate-400 hover:text-slate-600 active:scale-95'
+              )}
+            >
+              {isActive ? (
+                <div className="flex flex-col items-center justify-center px-3 py-1.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 backdrop-blur-md shadow-xs shadow-emerald-500/10">
+                  <Icon size={19} className="text-emerald-600 animate-pulse" />
+                  <span className="text-[9px] font-black uppercase tracking-wider mt-0.5 text-emerald-700">{item.label}</span>
+                </div>
+              ) : (
+                <>
+                  <Icon size={19} />
+                  <span className="text-[9px] font-bold uppercase tracking-wider mt-0.5">{item.label}</span>
+                </>
+              )}
+            </button>
+          );
+        })}
       </div>
 
     </div>
@@ -9101,7 +9098,7 @@ function MobileProfile({ currentUser, onBack, upsertSupabase, onLogout }) {
 
       {/* Header Banner - Apple Liquid Glass style */}
 
-      <div className="bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-500 p-6 pt-10 text-white rounded-b-[2rem] shadow-lg relative overflow-hidden shrink-0">
+      <div className="bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-500 p-6 text-white rounded-b-[2rem] shadow-lg relative overflow-hidden shrink-0" style={{ paddingTop: "calc(1.75rem + env(safe-area-inset-top))" }}>
 
         <div className="absolute -top-10 -left-10 w-28 h-28 bg-white/10 rounded-full blur-2xl pointer-events-none" />
 
