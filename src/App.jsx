@@ -2136,60 +2136,106 @@ export default function App() {
     setIsWelcomeModalOpen(false);
   };
 
-  // Idle Timeout Logic (1 hour / 3600000 ms) com verificação de timestamp e foco de janela
+  // Idle Timeout Logic:
+  // - Para Usuários Padrão: 1 hora de inatividade (3.600.000 ms)
+  // - Para Auditores/Inspetores: Sem expiração ao longo do dia! Na virada do dia (00:00), se inativo, expira; se ativo, renova automaticamente!
   useEffect(() => {
     if (!currentUser) return;
     
     // Regra de Exceção: O painel de TV não deve deslogar nunca
     if (currentUser.login?.toLowerCase() === 'painel.tv@alpitelbrasil.com.br') return;
-    
-    const INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 1 hora
+
+    const perfilNorm = (currentUser.perfil || '').trim().toUpperCase();
+    const setorNorm = (currentUser.setor || '').trim().toUpperCase();
+    const isAuditorUser = ['AUDITOR', 'INSPETOR', 'AUTOFISCALIZACAO', 'CAMPO'].includes(perfilNorm) || ['AUTOFISCALIZAÇÃO', 'AUTOFISCALIZACAO'].includes(setorNorm);
+
     let lastActivity = Date.now();
     let timeoutId;
+    let midnightCheckInterval;
+    let handleVis;
 
-    const expireSession = () => {
+    const expireSession = (reason = '1 hora de inatividade') => {
       handleLogout();
       showFeedback(
         'warning',
-        'Sessão Expirada por Inatividade',
-        'Sua sessão foi encerrada após 1 hora de inatividade. Por segurança e para garantir a versão mais recente do sistema, realize o login novamente.'
+        'Sessão Expirada',
+        `Sua sessão foi encerrada (${reason}). Por segurança e para garantir a versão mais recente do sistema, realize o login novamente.`
       );
     };
 
-    const checkAndResetTimer = () => {
-      const now = Date.now();
-      if (now - lastActivity >= INACTIVITY_LIMIT_MS) {
-        expireSession();
-        return;
-      }
-      lastActivity = now;
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        expireSession();
-      }, INACTIVITY_LIMIT_MS);
+    const updateActivity = () => {
+      lastActivity = Date.now();
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+    // Eventos de atividade do usuário
+    const events = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'];
+    events.forEach(ev => window.addEventListener(ev, updateActivity, { passive: true }));
+
+    if (isAuditorUser) {
+      // ═════════════════════════════════════════════════════════════════════
+      // 🛡️ REGRA ESPECIAL PARA AUDITORES: Sem deslogar ao longo do dia!
+      // ═════════════════════════════════════════════════════════════════════
+      console.log('[Sessão Auditor] Modo de Sessão Contínua Ativo (Sem timeout de 1h)');
+      let lastCheckedDay = new Date().getDate();
+
+      midnightCheckInterval = setInterval(() => {
+        const now = new Date();
+        const currentDay = now.getDate();
+
+        if (currentDay !== lastCheckedDay) {
+          lastCheckedDay = currentDay;
+          const inactiveMs = Date.now() - lastActivity;
+          const IS_INACTIVE_LIMIT = 60 * 60 * 1000; // Inativo por mais de 1h antes da meia-noite
+
+          if (inactiveMs >= IS_INACTIVE_LIMIT) {
+            console.log('[Sessão Auditor] Virada do dia (00:00) - Auditor inativo. Encerrando sessão.');
+            expireSession('na virada do dia (00:00) por inatividade');
+          } else {
+            console.log('[Sessão Auditor] Virada do dia (00:00) - Auditor ativo! Sessão renovada automaticamente.');
+          }
+        }
+      }, 60000);
+
+    } else {
+      // ═════════════════════════════════════════════════════════════════════
+      // 👤 REGRA PADRÃO PARA DEMAIS PERFIS: 1 hora de inatividade
+      // ═════════════════════════════════════════════════════════════════════
+      const INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 1 hora
+
+      const checkAndResetTimer = () => {
         const now = Date.now();
         if (now - lastActivity >= INACTIVITY_LIMIT_MS) {
-          expireSession();
+          expireSession('após 1 hora de inatividade');
+          return;
         }
-      }
-    };
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          expireSession('após 1 hora de inatividade');
+        }, INACTIVITY_LIMIT_MS);
+      };
 
-    const events = ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'];
-    events.forEach(e => window.addEventListener(e, checkAndResetTimer, { passive: true }));
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleVisibilityChange);
+      handleVis = () => {
+        if (document.visibilityState === 'visible') {
+          const now = Date.now();
+          if (now - lastActivity >= INACTIVITY_LIMIT_MS) {
+            expireSession('após 1 hora de inatividade');
+          }
+        }
+      };
 
-    checkAndResetTimer(); // Inicia o contador
+      document.addEventListener('visibilitychange', handleVis);
+      window.addEventListener('focus', handleVis);
+      checkAndResetTimer();
+    }
 
     return () => {
+      events.forEach(ev => window.removeEventListener(ev, updateActivity));
       clearTimeout(timeoutId);
-      events.forEach(e => window.removeEventListener(e, checkAndResetTimer));
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleVisibilityChange);
+      if (midnightCheckInterval) clearInterval(midnightCheckInterval);
+      if (handleVis) {
+        document.removeEventListener('visibilitychange', handleVis);
+        window.removeEventListener('focus', handleVis);
+      }
     };
   }, [currentUser, showFeedback]);
 
