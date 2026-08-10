@@ -7415,7 +7415,7 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
                      Nenhum chamado registrado para este veículo.
                    </div>
                  ) : (
-                   chamadosVeiculo.map(c => (
+                   paginatedVehChamados.map(c => (
                      <div key={c.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
                        <div className="flex justify-between items-start mb-3">
                          <div className="flex items-center gap-2">
@@ -10309,10 +10309,13 @@ function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
   const vehiclesMap = useMemo(() => new Map((vehicles || []).map(v => [v.placa, v])), [vehicles]);
 
   const [searchTerm, setSearchTerm] = useState('');
-
   const [filterStatus, setFilterStatus] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
 
-  
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterStatus]);
 
   const filtered = chamados.filter(c => {
 
@@ -10508,7 +10511,9 @@ function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
 
       <div className="space-y-4 p-6 bg-slate-50/50 rounded-[2rem] border border-slate-100">
 
-        {filtered.map(c => {
+        {renderPaginationBar()}
+
+        {paginatedData.map(c => {
 
           const veiculoObj = vehiclesMap.get(c.placa);
 
