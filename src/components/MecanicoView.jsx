@@ -69,7 +69,8 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
   const [showSenha, setShowSenha] = useState(false);
 
   // Helper
-  const getVehicle = (placa) => vehicles.find(v => v.placa === placa) || {};
+  const vehiclesMap = useMemo(() => new Map(vehicles.map(v => [v.placa, v])), [vehicles]);
+  const getVehicle = (placa) => vehiclesMap.get(placa) || {};
 
   // Filters
   const processedChamados = useMemo(() => {

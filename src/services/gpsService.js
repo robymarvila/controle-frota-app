@@ -85,6 +85,28 @@ class GpsService {
   }
 
   /**
+   * Verifica estritamente se a localização está "O tempo todo" no Android
+   */
+  async checkStrictPermission() {
+    if (!this.isNative()) return true; // Na web não há "O tempo todo"
+    try {
+      // Usamos importação dinâmica para não quebrar a web se o plugin não estiver carregado
+      const { Geolocation } = await import('@capacitor/geolocation');
+      const perm = await Geolocation.checkPermissions();
+      // O capacitor retorna location='granted' para foreground e 'granted' para background?
+      // O BackgroundGeolocation nativo pode nos dar um erro se addWatcher for chamado sem always.
+      // Vamos assumir que false bloqueia a tela.
+      if (perm.location !== 'granted') {
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.warn('[GPS Service] Erro ao checar permissão:', e);
+      return false; // Bloqueia por precaução se falhar nativamente
+    }
+  }
+
+  /**
    * Obtém a coordenada de alta precisão atual imediatamente
    */
   async getCurrentPositionFix() {

@@ -12,25 +12,15 @@ import { notificationService } from '../services/notificationService';
 import * as XLSX from 'xlsx';
 
 import {
-
   Calendar, CheckCircle, XCircle, Clock, Search, FileText,
-
   ChevronRight, Users, Camera, AlertCircle, Download,
-
   BarChart3, Home, ArrowLeft, Plus, Trash2, Check,
-
   MapPin, Zap, Activity, Navigation, CheckCircle2,
-
   ChevronDown, ChevronUp, FileCheck, Eye, PauseCircle,
-
   Filter, FileSignature, Upload, X, AlertTriangle,
-
   ClipboardCheck, PlayCircle, User, History, Send, UserPlus, Tv,
-
   List, Grid, Database, EyeOff, LogOut, ArrowLeftRight, CalendarX,
-
-  CloudLightning, Loader2, RefreshCw
-
+  CloudLightning, Loader2, RefreshCw, Contact, Map as MapIcon
 } from 'lucide-react';
 
 import {
@@ -444,6 +434,21 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
   const [colaboradoresList, setColaboradoresList] = useState([]);
 
   const [loading, setLoading] = useState(true);
+  
+  // ── Strict GPS Permission Block
+  const [gpsBlocked, setGpsBlocked] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const verifyGps = async () => {
+      if (isMobileAuditor && gpsService.isNative()) {
+        const hasPerm = await gpsService.checkStrictPermission();
+        if (active) setGpsBlocked(!hasPerm);
+      }
+    };
+    verifyGps();
+    return () => { active = false; };
+  }, [isMobileAuditor]);
 
   const canImportOS = useMemo(() => {
 
@@ -1674,6 +1679,24 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
       }
 
     };
+
+    if (gpsBlocked) {
+      return (
+        <div className="w-full h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
+          <AlertTriangle size={64} className="text-red-500 mb-6 animate-pulse" />
+          <h2 className="text-white text-2xl font-black mb-4 uppercase tracking-widest">Acesso Bloqueado</h2>
+          <p className="text-slate-300 text-sm leading-relaxed mb-8 max-w-sm">
+            O aplicativo exige que a permissão de localização esteja configurada como <strong className="text-white">"Permitir o tempo todo"</strong> para que possamos monitorar seu trajeto e manter a sua segurança em campo, mesmo quando a tela estiver apagada.
+          </p>
+          <button
+            onClick={() => gpsService.openSettings()}
+            className="w-full max-w-xs bg-red-600 hover:bg-red-700 text-white font-black py-4 rounded-2xl shadow-lg transition-all text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95"
+          >
+            <Zap size={18} /> ABRIR CONFIGURAÇÕES
+          </button>
+        </div>
+      );
+    }
 
     return (
 
@@ -6639,6 +6662,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
 
   const [showShiftModal, setShowShiftModal] = useState(false);
   const [modalPlaca, setModalPlaca] = useState('');
+  const [modalTelefone, setModalTelefone] = useState('');
   const [hasConfirmedGpsPerm, setHasConfirmedGpsPerm] = useState(false);
   const [filterDate, setFilterDate] = useState('');
 
@@ -6649,8 +6673,18 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
   const [collapsedGroups, setCollapsedGroups] = useState({});
 
   const [swapTarget, setSwapTarget] = useState(null); // The OS to swap with
-
   const [showSwapModal, setShowSwapModal] = useState(null); // OS selected for swap
+  const [currentMapPos, setCurrentMapPos] = useState(null);
+
+  useEffect(() => {
+    if (activeTab === 'map' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => setCurrentMapPos([pos.coords.latitude, pos.coords.longitude]),
+        () => {},
+        { enableHighAccuracy: true }
+      );
+    }
+  }, [activeTab]);
 
   // ── Loading Scale & Shift
 
@@ -6747,27 +6781,24 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
       }
 
       setScale(esc);
-
       setShift(s || null);
-
       setScaleLoading(false);
 
       const { data: p } = await supabase.from('autofiscalizacao_auditor_prefs').select('*').eq('auditor', auditorName).maybeSingle();
-
       if (p) setPref(p);
 
       const { data: shs } = await supabase.from('autofiscalizacao_shifts').select('*').eq('auditor', auditorName);
-
       if (shs) setMyMonthlyShifts(shs);
 
+      // REDIRECIONAMENTO AUTOMÁTICO
+      if (esc && !s) {
+        setActiveTab('ponto');
+      }
+
     } catch (err) {
-
       console.error(err);
-
       setScaleLoading(false);
-
     }
-
   };
 
   useEffect(() => {
@@ -6891,8 +6922,15 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
     if (!modalPlaca || !modalPlaca.trim()) {
       return alert('A placa do veículo é obrigatória.');
     }
+    if (!modalTelefone || modalTelefone.replace(/\D/g, '').length < 10) {
+      return alert('O número de telefone válido é obrigatório.');
+    }
+    if (!hasConfirmedGpsPerm) {
+      return alert('É obrigatório confirmar as permissões de GPS e Bateria.');
+    }
 
     const cleanPlaca = modalPlaca.toUpperCase().replace(/\s+/g, '').trim();
+    const cleanTelefone = modalTelefone.trim();
     const todayStr = new Date().toLocaleDateString('en-CA');
     const now = new Date().toISOString();
     const auditorName = currentUser?.login || currentUser?.nome;
@@ -6901,6 +6939,9 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
       return alert('Seu navegador não suporta geolocalização.');
     }
 
+    // Se estivermos na aba ponto, após iniciar queremos voltar para o painel ou agenda (dashboard/timeline)
+    // Para UX: vamos mudar para dashboard depois
+    
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const lat = pos.coords.latitude;
@@ -6915,6 +6956,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
             date: shiftDate,
             start_time: now,
             placa_veiculo: cleanPlaca,
+            telefone: cleanTelefone,
             gps_lat: lat,
             gps_lng: lng,
             gps_last_update: now,
@@ -7643,24 +7685,41 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
                   <Marker key={a.inspid + '-' + i} position={[lat, lng]} icon={mapMarkerIcon}>
 
                     <Popup>
-
-                      <div className="p-1 font-sans text-xs">
-
-                        <strong>OS: {a.osid}</strong>
-
-                        <div>Sequência: {label}</div>
-
+                      <div className="p-1 font-sans text-xs flex flex-col gap-2 min-w-[120px]">
+                        <div>
+                          <strong className="block text-slate-800">OS: {a.osid}</strong>
+                          <span className="text-slate-500">Sequência: {label}</span>
+                        </div>
+                        <a 
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] uppercase font-black tracking-wider text-center py-2 rounded-lg flex items-center justify-center gap-1.5 mt-1 transition-colors"
+                        >
+                          <MapIcon size={12} /> Ir ao Endereço
+                        </a>
                       </div>
-
                     </Popup>
-
                   </Marker>
-
                 );
-
               })}
 
               {mapPoints.length > 1 && <Polyline positions={mapPoints} color="#2563eb" weight={3} dashArray="5, 10" />}
+
+              {currentMapPos && (
+                <Marker 
+                  position={currentMapPos} 
+                  icon={L.divIcon({
+                    html: `<div class="relative flex items-center justify-center w-5 h-5"><div class="absolute inline-flex w-full h-full rounded-full bg-blue-400 opacity-75 animate-ping"></div><div class="relative inline-flex w-3.5 h-3.5 rounded-full bg-blue-600 border-2 border-white shadow-sm"></div></div>`,
+                    className: 'custom-map-icon',
+                    iconSize: [20, 20]
+                  })}
+                >
+                  <Popup>
+                    <div className="text-xs font-black text-slate-700">Minha Localização</div>
+                  </Popup>
+                </Marker>
+              )}
 
             </MapContainer>
 
@@ -7932,369 +7991,229 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
 
       {/* ─── TAB 5: PROFILE & PONTO CONTROL ─── */}
 
-      {activeTab === 'profile' && (
-
-        <div className="flex-1 flex flex-col p-5 space-y-5 animate-in fade-in duration-300">
-
+      {/* ─── TAB 3: PONTO ELETRÔNICO ─── */}
+      {activeTab === 'ponto' && (
+        <div className="flex-1 flex flex-col p-5 space-y-5 animate-in fade-in duration-300 bg-slate-50 pb-24">
           <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-
             <div className="flex justify-between items-center">
-
               <h3 className="font-black text-slate-800 text-xs uppercase tracking-wider flex items-center gap-2">
-
-                <Clock size={14} className="text-blue-600 animate-pulse" /> Ponto Eletrônico
-
+                <Clock size={14} className="text-blue-600 animate-pulse" /> Controle de Ponto
               </h3>
-
               <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg border ${shift?.start_time && !shift?.end_time
-
                 ? shift.meal_start && !shift.meal_end ? 'bg-amber-50 border-amber-100 text-amber-600' : 'bg-emerald-50 border-emerald-100 text-emerald-600 animate-pulse'
-
                 : 'bg-slate-100 border-slate-200 text-slate-400'
-
                 }`}>
-
                 {shift?.start_time && !shift?.end_time
-
                   ? shift.meal_start && !shift.meal_end ? 'Em Refeição' : 'Turno Ativo'
-
-                  : 'Ausente / Ponto Fechado'}
-
+                  : 'Ponto Fechado'}
               </span>
-
             </div>
+            
+            {/* Se o turno ainda não começou, mostra os inputs de início */}
+            {!shift?.start_time ? (
+              <div className="space-y-4 pt-2">
+                <p className="text-[11px] text-slate-500 leading-relaxed font-medium">
+                  Para iniciar seu turno de trabalho, informe os dados abaixo e confirme as permissões para rastreamento em tempo real.
+                </p>
 
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[9px] font-black uppercase text-slate-400 mb-1 tracking-wider">Placa do Veículo</label>
+                    <input
+                      type="text"
+                      value={modalPlaca}
+                      onChange={e => setModalPlaca(e.target.value.toUpperCase())}
+                      placeholder="ABC-1234"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-800 text-center text-lg outline-none focus:ring-2 focus:ring-emerald-500 transition-all uppercase tracking-wider"
+                      maxLength={8}
+                    />
+                  </div>
 
-              <div className="grid grid-cols-2 gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-
-                <div>
-
-                  <span className="text-slate-400 font-mono block">Início Turno</span>
-
-                  <span className="text-slate-750 block mt-0.5">{shift?.start_time ? fmtTime(shift.start_time) : '--:--'}</span>
-
+                  <div>
+                    <label className="block text-[9px] font-black uppercase text-slate-400 mb-1 tracking-wider">Telefone (Celular)</label>
+                    <input
+                      type="tel"
+                      value={modalTelefone}
+                      onChange={e => {
+                        let v = e.target.value.replace(/\D/g, '');
+                        if (v.length > 11) v = v.substring(0, 11);
+                        v = v.replace(/^(\d{2})(\d)/g, '$1 $2');
+                        v = v.replace(/(\d{5})(\d)/, '$1-$2');
+                        setModalTelefone(v);
+                      }}
+                      placeholder="11 9XXXX-XXXX"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-800 text-center text-lg outline-none focus:ring-2 focus:ring-emerald-500 transition-all tracking-wider"
+                      maxLength={13}
+                    />
+                  </div>
                 </div>
 
-                <div>
-
-                  <span className="text-slate-400 font-mono block">Veículo / Placa</span>
-
-                  <span className="text-slate-750 block mt-0.5">{shift?.placa_veiculo || '--'}</span>
-
+                <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 text-left space-y-3 mt-4">
+                  <div className="flex items-center gap-2 text-amber-900 font-black text-xs uppercase tracking-wide">
+                    <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+                    <span>Telemetria Contínua Obrigatória</span>
+                  </div>
+                  <div className="text-[11px] text-amber-950 space-y-2 leading-tight">
+                    <p><strong>GPS:</strong> "Permitir o tempo todo"</p>
+                    <p><strong>Bateria:</strong> "Sem Restrições"</p>
+                  </div>
+                  {gpsService.isNative() && (
+                    <button
+                      type="button"
+                      onClick={() => gpsService.openSettings()}
+                      className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] rounded-xl uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                    >
+                      <Zap size={14} /> Abrir Configurações
+                    </button>
+                  )}
                 </div>
 
-                <div className="pt-2 border-t border-slate-200/50">
-
-                  <span className="text-slate-400 font-mono block">Refeição</span>
-
-                  <span className="text-slate-750 block mt-0.5">
-
-                    {shift?.meal_start ? fmtTime(shift.meal_start) : '--'} a {shift?.meal_end ? fmtTime(shift.meal_end) : '--'}
-
+                <label className="flex items-start gap-2.5 p-3 bg-white border border-slate-200 rounded-xl cursor-pointer select-none text-left shadow-sm">
+                  <input
+                    type="checkbox"
+                    checked={hasConfirmedGpsPerm}
+                    onChange={e => setHasConfirmedGpsPerm(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
+                  />
+                  <span className="text-[10px] text-slate-700 font-medium leading-tight">
+                    Confirmo que configurei a localização <strong>O tempo todo</strong>.
                   </span>
-
-                </div>
-
-                <div className="pt-2 border-t border-slate-200/50">
-
-                  <span className="text-slate-400 font-mono block">Término Turno</span>
-
-                  <span className="text-slate-750 block mt-0.5">{shift?.end_time ? fmtTime(shift.end_time) : '--:--'}</span>
-
-                </div>
-
-              </div>
-
-            </div>
-
-            <div className="space-y-2 pt-2">
-
-              {!shift?.start_time ? (
+                </label>
 
                 <button
-
-                  onClick={() => handleShiftAction('start')}
-
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-2xl shadow-lg shadow-blue-100 transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95"
-
+                  onClick={handleStartShiftSubmit}
+                  disabled={!modalPlaca.trim() || !modalTelefone.trim() || !hasConfirmedGpsPerm}
+                  className={`w-full font-black py-4 rounded-2xl shadow-lg transition-all text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 mt-4 ${
+                    modalPlaca.trim() && modalTelefone.trim() && hasConfirmedGpsPerm
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
                 >
-
-                  <PlayCircle size={16} /> INICIAR EXPEDIENTE
-
+                  <PlayCircle size={18} /> AUTORIZAR E INICIAR
                 </button>
-
-              ) : (
-
-                <div className="grid grid-cols-2 gap-2">
-
-                  {!shift.meal_start ? (
-
-                    <button
-
-                      onClick={() => handleShiftAction('meal_start')}
-
-                      className="bg-amber-500 hover:bg-amber-600 text-white font-black py-2.5 rounded-xl text-[10px] shadow-sm uppercase tracking-wider flex justify-center items-center gap-1 active:scale-95"
-
-                    >
-
-                      INICIAR REFEIÇÃO
-
-                    </button>
-
-                  ) : !shift.meal_end ? (
-
-                    <button
-
-                      onClick={() => handleShiftAction('meal_end')}
-
-                      className="bg-emerald-500 hover:bg-emerald-600 text-white font-black py-2.5 rounded-xl text-[10px] shadow-sm uppercase tracking-wider flex justify-center items-center gap-1 active:scale-95"
-
-                    >
-
-                      RETORNAR REFEIÇÃO
-
-                    </button>
-
-                  ) : (
-
-                    <div className="bg-slate-100 text-slate-400 font-black py-2.5 rounded-xl text-[10px] flex justify-center items-center uppercase tracking-wider border">
-
-                      REFEIÇÃO CONCLUÍDA
-
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <div className="grid grid-cols-2 gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <div>
+                      <span className="text-slate-400 font-mono block">Início Turno</span>
+                      <span className="text-slate-750 block mt-0.5 text-xs text-slate-900">{shift?.start_time ? fmtTime(shift.start_time) : '--:--'}</span>
                     </div>
+                    <div>
+                      <span className="text-slate-400 font-mono block">Veículo</span>
+                      <span className="text-slate-750 block mt-0.5 text-xs text-slate-900">{shift?.placa_veiculo || '--'}</span>
+                    </div>
+                    <div className="pt-2 border-t border-slate-200/50">
+                      <span className="text-slate-400 font-mono block">Refeição</span>
+                      <span className="text-slate-750 block mt-0.5 text-xs text-slate-900">
+                        {shift?.meal_start ? fmtTime(shift.meal_start) : '--'} a {shift?.meal_end ? fmtTime(shift.meal_end) : '--'}
+                      </span>
+                    </div>
+                    <div className="pt-2 border-t border-slate-200/50">
+                      <span className="text-slate-400 font-mono block">Término Turno</span>
+                      <span className="text-slate-750 block mt-0.5 text-xs text-slate-900">{shift?.end_time ? fmtTime(shift.end_time) : '--:--'}</span>
+                    </div>
+                  </div>
+                </div>
 
+                <div className="grid grid-cols-2 gap-3">
+                  {!shift.meal_start ? (
+                    <button
+                      onClick={() => handleShiftAction('meal_start')}
+                      className="bg-amber-500 hover:bg-amber-600 text-white font-black py-3 rounded-2xl text-[10px] shadow-sm uppercase tracking-wider flex justify-center items-center gap-1 active:scale-95"
+                    >
+                      INICIAR REFEIÇÃO
+                    </button>
+                  ) : !shift.meal_end ? (
+                    <button
+                      onClick={() => handleShiftAction('meal_end')}
+                      className="bg-blue-500 hover:bg-blue-600 text-white font-black py-3 rounded-2xl text-[10px] shadow-sm uppercase tracking-wider flex justify-center items-center gap-1 active:scale-95"
+                    >
+                      RETORNAR REFEIÇÃO
+                    </button>
+                  ) : (
+                    <div className="bg-slate-100 text-slate-400 font-black py-3 rounded-2xl text-[10px] flex justify-center items-center uppercase tracking-wider border">
+                      REFEIÇÃO CONCLUÍDA
+                    </div>
                   )}
 
                   {!shift.end_time ? (
-
                     <button
-
                       onClick={() => handleShiftAction('end')}
-
-                      className="bg-red-500 hover:bg-red-600 text-white font-black py-2.5 rounded-xl text-[10px] shadow-sm uppercase tracking-wider flex justify-center items-center gap-1 active:scale-95"
-
+                      className="bg-red-500 hover:bg-red-600 text-white font-black py-3 rounded-2xl text-[10px] shadow-sm uppercase tracking-wider flex justify-center items-center gap-1 active:scale-95"
                     >
-
                       ENCERRAR DIA
-
                     </button>
-
                   ) : (
-
-                    <div className="bg-slate-100 text-slate-400 font-black py-2.5 rounded-xl text-[10px] flex justify-center items-center uppercase tracking-wider border">
-
+                    <div className="bg-slate-100 text-slate-400 font-black py-3 rounded-2xl text-[10px] flex justify-center items-center uppercase tracking-wider border">
                       DIA ENCERRADO
-
                     </div>
-
                   )}
-
                 </div>
-
-              )}
-
-            </div>
-
+              </div>
+            )}
           </div>
-
-          <MobileProfile
-
-            currentUser={currentUser}
-
-            onBack={() => setActiveTab('dashboard')}
-
-            upsertSupabase={async (table, data) => {
-
-              const { error } = await supabase.from(table).upsert(data);
-
-              return !error;
-
-            }}
-
-          />
-
         </div>
+      )}
 
+      {/* ─── TAB 5: PROFILE ─── */}
+      {activeTab === 'profile' && (
+        <div className="flex-1 flex flex-col animate-in fade-in duration-300 bg-slate-50 pb-24 h-full overflow-y-auto">
+          <MobileProfile
+            currentUser={currentUser}
+            onBack={() => setActiveTab('dashboard')}
+            onLogout={onLogout}
+            upsertSupabase={async (table, data) => {
+              const { error } = await supabase.from(table).upsert(data);
+              return !error;
+            }}
+          />
+        </div>
       )}
 
       {/* ─── BOTTOM NAVIGATION BAR (Instagram / WhatsApp Style) ─── */}
-
-      <div className="fixed bottom-0 left-0 right-0 h-16 bg-white/90 backdrop-blur-lg border-t border-slate-200/80 flex items-center justify-around px-4 z-40 shadow-lg shrink-0 select-none">
-
+      <div 
+        className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200/80 flex items-center justify-around px-2 z-40 shadow-lg shrink-0 select-none"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)', height: 'calc(64px + env(safe-area-inset-bottom))' }}
+      >
         <button
-
           onClick={() => setActiveTab('dashboard')}
-
-          className={`flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
-
+          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'dashboard' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
         >
-
-          <BarChart3 size={18} />
-
-          <span className="text-[8px] font-black uppercase tracking-widest">Painel</span>
-
+          <BarChart3 size={20} />
+          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Painel</span>
         </button>
-
         <button
-
           onClick={() => setActiveTab('timeline')}
-
-          className={`flex flex-col items-center gap-1 ${activeTab === 'timeline' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
-
+          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'timeline' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
         >
-
-          <Clock size={18} />
-
-          <span className="text-[8px] font-black uppercase tracking-widest">Timeline</span>
-
+          <Clock size={20} />
+          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Agenda</span>
         </button>
-
         <button
-
+          onClick={() => setActiveTab('ponto')}
+          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'ponto' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all relative`}
+        >
+          {activeTab === 'ponto' && <div className="absolute top-0 w-8 h-1 bg-emerald-500 rounded-b-full"></div>}
+          <Contact size={20} />
+          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Ponto</span>
+        </button>
+        <button
           onClick={() => setActiveTab('map')}
-
-          className={`flex flex-col items-center gap-1 ${activeTab === 'map' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
-
+          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'map' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
         >
-
-          <MapPin size={18} />
-
-          <span className="text-[8px] font-black uppercase tracking-widest">Mapa</span>
-
+          <MapIcon size={20} />
+          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Mapa</span>
         </button>
-
         <button
-
-          onClick={() => setActiveTab('list')}
-
-          className={`flex flex-col items-center gap-1 ${activeTab === 'list' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
-
-        >
-
-          <List size={18} />
-
-          <span className="text-[8px] font-black uppercase tracking-widest">Lista</span>
-
-        </button>
-
-        <button
-
           onClick={() => setActiveTab('profile')}
-
-          className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
-
+          className={`flex flex-col items-center justify-center h-full gap-1 flex-1 ${activeTab === 'profile' ? 'text-emerald-500 font-black scale-105' : 'text-slate-400 hover:text-slate-600'} transition-all`}
         >
-
-          <User size={18} />
-
-          <span className="text-[8px] font-black uppercase tracking-widest">Ponto</span>
-
+          <User size={20} />
+          <span className="text-[9px] font-black uppercase tracking-widest mt-0.5">Perfil</span>
         </button>
-
       </div>
-
-      {/* ─── SHIFT START MODAL ─── */}
-
-      {showShiftModal && (
-
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-
-          <div className="bg-white w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl p-6 shadow-2xl flex flex-col max-h-[85vh] animate-in slide-in-from-bottom duration-300">
-
-            <div className="flex justify-between items-center mb-4">
-
-              <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
-
-                <PlayCircle className="text-blue-600" /> Iniciar Expediente
-
-              </h3>
-
-              <button onClick={() => setShowShiftModal(false)} className="p-1 rounded-full hover:bg-slate-100 text-slate-400">
-
-                <X size={20} />
-
-              </button>
-
-            </div>
-
-            <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-              Para iniciar seu turno de trabalho, informe a placa do veículo e confirme as permissões para rastreamento em tempo real.
-            </p>
-
-            <div className="space-y-4 flex-1 overflow-y-auto pr-1">
-              <div>
-                <label className="block text-[9px] font-black uppercase text-slate-400 mb-1 tracking-wider">Placa do Veículo</label>
-                <input
-                  type="text"
-                  value={modalPlaca}
-                  onChange={e => setModalPlaca(e.target.value.toUpperCase())}
-                  placeholder="ABC-1234"
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-800 text-center text-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all uppercase tracking-wider"
-                  maxLength={8}
-                />
-              </div>
-
-              {/* ── CARD DE CONFORMIDADE OBRIGATÓRIA ANDROID ── */}
-              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 text-left space-y-3">
-                <div className="flex items-center gap-2 text-amber-900 font-black text-xs uppercase tracking-wide">
-                  <AlertTriangle size={16} className="text-amber-600 shrink-0" />
-                  <span>Requisitos para Telemetria Contínua</span>
-                </div>
-
-                <div className="text-[11px] text-amber-950 space-y-2 leading-tight">
-                  <div className="flex items-start gap-2">
-                    <span className="text-emerald-600 font-black">1.</span>
-                    <p><strong>Localização:</strong> Selecione <span className="bg-amber-200/70 px-1 py-0.5 rounded font-black text-amber-950">"Permitir o tempo todo"</span> para manter o envio com tela apagada.</p>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <span className="text-emerald-600 font-black">2.</span>
-                    <p><strong>Bateria:</strong> Defina como <span className="bg-amber-200/70 px-1 py-0.5 rounded font-black text-amber-950">"Sem Restrições"</span> (Não Otimizar).</p>
-                  </div>
-                </div>
-
-                {gpsService.isNative() && (
-                  <button
-                    type="button"
-                    onClick={() => gpsService.openSettings()}
-                    className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] rounded-xl uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                  >
-                    <Zap size={14} /> Abrir Configurações do Android
-                  </button>
-                )}
-              </div>
-
-              {/* ── CHECKBOX DE CONFIRMAÇÃO OBRIGATÓRIO ── */}
-              <label className="flex items-start gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer select-none text-left">
-                <input
-                  type="checkbox"
-                  checked={hasConfirmedGpsPerm}
-                  onChange={e => setHasConfirmedGpsPerm(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
-                />
-                <span className="text-[11px] text-slate-700 font-medium leading-tight">
-                  Confirmo que configurei a localização para <strong>"O tempo todo"</strong> e a bateria <strong>"Sem restrições"</strong>.
-                </span>
-              </label>
-            </div>
-
-            <button
-              onClick={handleStartShiftSubmit}
-              disabled={!modalPlaca.trim() || !hasConfirmedGpsPerm}
-              className={`mt-4 w-full font-black py-3 rounded-xl shadow-md transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 ${
-                modalPlaca.trim() && hasConfirmedGpsPerm
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-blue-500/20'
-                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-              }`}
-            >
-              AUTORIZAR E INICIAR <Check size={16} />
-            </button>
-
-          </div>
-
-        </div>
-
-      )}
 
     </div>
 

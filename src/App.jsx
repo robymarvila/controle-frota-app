@@ -1211,6 +1211,8 @@ export default function App() {
      return rawVehicles.filter(v => (v.regional || '').toLowerCase() === targetRegion);
   }, [rawVehicles, activeRegional]);
 
+  const vehiclesMap = useMemo(() => new Map(vehicles.map(v => [v.placa, v])), [vehicles]);
+
   const chamados = useMemo(() => {
      if (activeRegional === 'Todas' || activeRegional === 'Global') return rawChamados;
      const targetRegion = (activeRegional || '').trim().toLowerCase();
@@ -1227,54 +1229,38 @@ export default function App() {
      );
   }, [rawColaboradores, activeRegional]);
 
-
-
   const [vinculosEquipe, setVinculosEquipe] = useState({});
 
   const [loadingDb, setLoadingDb] = useState(true);
 
-
-
   // Sync with Supabase on mount
-
   useEffect(() => {
-
     async function fetchData() {
-
       setLoadingDb(true);
 
       const { data: usersData } = await supabase.from('usuarios').select('*');
-
       const { data: vehiclesData } = await supabase.from('veiculos').select('*');
       const { data: laudosData } = await supabase.from('veiculo_laudos').select('*').order('data_inclusao', { ascending: false });
       if (laudosData) setLaudosGeral(laudosData);
 
-      // Busca paginada resiliente para chamados (evita erro 500 / statement timeout do Postgres por anexos pesados)
-      let allChamados = [];
-      let pageChamados = 0;
-      const chamadosPageSize = 35;
-      let hasMoreChamados = true;
-      while (hasMoreChamados) {
-        const from = pageChamados * chamadosPageSize;
-        const to = from + chamadosPageSize - 1;
-        const { data: cData, error: cErr } = await supabase
-          .from('chamados')
-          .select('*')
-          .order('id', { ascending: false })
-          .range(from, to);
-        if (cErr) {
-          console.warn('Aviso no carregamento de lote de chamados:', cErr);
-          break;
-        }
-        if (cData && cData.length > 0) {
-          allChamados = [...allChamados, ...cData];
-          if (cData.length < chamadosPageSize) hasMoreChamados = false;
-          else pageChamados++;
-        } else {
-          hasMoreChamados = false;
-        }
+      // Busca otimizada de chamados (campos selecionados + ordenação JS para máxima performance)
+      const fieldsChamados = 'id,placa,numero,dataAbertura,dataHoraFechamento,situacaoVeiculo,oficinaExterna,status,pendencia,defeitoEncontrado,motorista,defeitoPrincipal,etapaWorkflow,naoImpeditivo,prejuizoAcumulado,oficinaDestino,regional,codigoChamado,alertas';
+      let cData = null;
+      let cErr = null;
+
+      try {
+        const res = await supabase.from('chamados').select(fieldsChamados).limit(1000);
+        cData = res.data;
+        cErr = res.error;
+      } catch (err) {
+        cErr = err;
       }
-      const chamadosData = allChamados;
+
+      if (cErr) {
+        console.warn('Aviso no carregamento de chamados:', cErr);
+      }
+
+      const chamadosData = (cData || []).sort((a, b) => (b.id || 0) - (a.id || 0));
 
       // Paginated fetch to bypass Supabase default 1000 rows limit
       let allBaseUni = [];
@@ -2296,7 +2282,7 @@ export default function App() {
 
     }
 
-    const vForPrejuizo = vehicles.find(vec => vec.placa === chamadoFinal.placa);
+    const vForPrejuizo = vehiclesMap.get(chamadoFinal.placa);
 
     chamadoFinal.prejuizoAcumulado = getPrejuizoChamado(chamadoFinal, vForPrejuizo, chamadoFinal.dataHoraFechamento || hoje);
 
@@ -2312,7 +2298,7 @@ export default function App() {
 
     // Atualiza status do veículo
 
-    const vecAlterado = vehicles.find(v => v.placa === chamadoFinal.placa);
+    const vecAlterado = vehiclesMap.get(chamadoFinal.placa);
 
     if (vecAlterado) {
 
@@ -2374,7 +2360,7 @@ export default function App() {
 
           const logs = [{ id: Date.now(), dataHora: hoje.toISOString(), usuario: currentUser?.nome || 'Sistema', descricao: `Veículo Manteve-se Parado. Novo Chamado: ${dadosChamado.numero}. Defeito: ${pendingLiberacaoImpeditiva.defeitoPrincipal}` }, ...(antigo.historicoModificacoes || [])];
 
-          const vClosed = vehicles.find(vec => vec.placa === antigo.placa);
+          const vClosed = vehiclesMap.get(antigo.placa);
 
           const chamadoFechado = { 
 
@@ -2421,7 +2407,7 @@ export default function App() {
 
       
 
-      const vEdit = vehicles.find(vec => vec.placa === dadosChamado.placa);
+      const vEdit = vehiclesMap.get(dadosChamado.placa);
 
       chamadoFinal = { 
 
@@ -2481,7 +2467,7 @@ export default function App() {
 
     setRawChamados(chamadosAtuais);
 
-    const vecAlterado = vehicles.find(v => v.placa === dadosChamado.placa);
+    const vecAlterado = vehiclesMap.get(dadosChamado.placa);
 
     if (vecAlterado) {
 
@@ -2586,7 +2572,7 @@ export default function App() {
 
 
 
-    const vForLib = vehicles.find(vec => vec.placa === chamadoOriginal.placa);
+    const vForLib = vehiclesMap.get(chamadoOriginal.placa);
 
     const chamadoFinal = { 
 
@@ -6029,7 +6015,7 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
   let totalChamadosFiltradosDefeitos = 0;
 
   chamadosUltimos60Dias.forEach(c => {
-    const v = vehicles.find(vec => vec.placa === c.placa);
+    const v = vehiclesMap.get(c.placa);
     if (!v) return;
 
     if (defeitosFiltroTipo !== 'todos') {
@@ -6061,7 +6047,7 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
   // 2. TOP Motoristas
 
   const topMotoristasChamados = chamadosUltimos60Dias.filter(c => {
-    const v = vehicles.find(vec => vec.placa === c.placa);
+    const v = vehiclesMap.get(c.placa);
     return !!v; // Respect regional view
   });
 
@@ -6088,7 +6074,7 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
   let oficInternaCount = 0;
 
   chamadosUltimos60Dias.forEach(c => {
-    const v = vehicles.find(vec => vec.placa === c.placa);
+    const v = vehiclesMap.get(c.placa);
     if (!v) return;
 
     if (oficinaFiltroTipo !== 'todos') {
@@ -6923,7 +6909,7 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
 
             {topVeiculosProblematicos.map(([placa, qtd], idx) => {
 
-               const vec = vehicles.find(v => v.placa === placa);
+               const vec = vehiclesMap.get(placa);
 
                return (
 
@@ -7364,6 +7350,7 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
 
 
 function ChamadosView({ chamados, vehicles, hoje, onEditar, onLiberar, userPermissions }) {
+  const vehiclesMap = useMemo(() => new Map((vehicles || []).map(v => [v.placa, v])), [vehicles]);
 
   const [filters, setFilters] = useState({ turno: '', tipoOp: '', subTipo: '', etapa: '', subFluxo: '' });
   const [searchQuery, setSearchQuery] = useState('');
@@ -7394,7 +7381,7 @@ function ChamadosView({ chamados, vehicles, hoje, onEditar, onLiberar, userPermi
 
 
 
-     const veiculo = vehicles.find(v => v.placa === c.placa);
+     const veiculo = vehiclesMap.get(c.placa);
 
      const matchTurno = veiculo ? (filters.turno ? String(veiculo.turno || '').toUpperCase() === String(filters.turno).toUpperCase() : true) : true;
 
@@ -7426,7 +7413,7 @@ function ChamadosView({ chamados, vehicles, hoje, onEditar, onLiberar, userPermi
 
         {list.map(c => {
 
-          const veiculoObj = vehicles.find(v => v.placa === c.placa);
+          const veiculoObj = vehiclesMap.get(c.placa);
 
           const equipeCod = veiculoObj?.equipes?.[0]?.codEquipe || 'Sem Equipe';
 
@@ -10196,6 +10183,7 @@ function DetalhesColaboradorView({ colaborador, vehicles, hoje, currentUser, onV
 
 
 function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
+  const vehiclesMap = useMemo(() => new Map((vehicles || []).map(v => [v.placa, v])), [vehicles]);
 
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -10221,7 +10209,7 @@ function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
 
       const dataToExport = filtered.map(c => {
 
-        const veiculoObj = vehicles.find(v => v.placa === c.placa);
+        const veiculoObj = vehiclesMap.get(c.placa);
 
         const prejuizoVal = getPrejuizoChamado(c, veiculoObj, hoje);
 
@@ -10399,7 +10387,7 @@ function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
 
         {filtered.map(c => {
 
-          const veiculoObj = vehicles.find(v => v.placa === c.placa);
+          const veiculoObj = vehiclesMap.get(c.placa);
 
           const equipeCod = veiculoObj?.equipes?.[0]?.codEquipe || 'Sem Equipe';
 
@@ -15067,7 +15055,7 @@ function ModalGraficosDashboard({ chartType, vehicles, chamados, hoje, onClose }
 
   const chamadosFiltrados = chamados.filter(c => {
 
-    const v = vehicles.find(vec => vec.placa === c.placa);
+    const v = vehiclesMap.get(c.placa);
 
     const dAberta = new Date(c.dataAbertura);
 
@@ -15189,7 +15177,7 @@ function ModalGraficosDashboard({ chartType, vehicles, chamados, hoje, onClose }
 
          if (dAbert <= dateEnd && c.situacaoVeiculo === 'PARADO') {
 
-            const v = vehicles.find(vec => vec.placa === c.placa);
+            const v = vehiclesMap.get(c.placa);
 
             let dFechamento = c.dataHoraFechamento ? new Date(c.dataHoraFechamento) : dateEnd;
 
@@ -18002,7 +17990,7 @@ function PainelTVView({ vehicles, chamados, activeRegional, setActiveRegional, c
 
     if (c.status !== 'ABERTO') return false;
 
-    const veiculo = vehicles.find(v => v.placa === c.placa);
+    const veiculo = vehiclesMap.get(c.placa);
 
     if (!veiculo) return true;
 
@@ -18570,7 +18558,7 @@ function PainelTVView({ vehicles, chamados, activeRegional, setActiveRegional, c
 
                   list.map(c => {
 
-                    const veiculo = vehicles.find(v => v.placa === c.placa);
+                    const veiculo = vehiclesMap.get(c.placa);
 
                     
 
