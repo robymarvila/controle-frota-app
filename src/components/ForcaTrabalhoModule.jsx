@@ -2122,10 +2122,28 @@ export default function ForcaTrabalhoModule({ currentUser, userPermissions, vehi
     setBaseUnificadaData(updatedData);
     localStorage.setItem('fleet_base_unificada_cache', JSON.stringify(updatedData));
     
-    // Sincronizar com Supabase
+    // Sincronizar com Supabase (enviando apenas colunas validas da tabela)
     try {
-      const payload = { ...updatedEmp };
-      delete payload.base_contrato;
+      const validColumns = [
+        'matricula', 'chave_primaria', 'nome', 'funcao', 'qtd_faltas_atual',
+        'status_falta', 'base_ut', 'status_forca', 'acao_a_ser_feita', 'grupo_folga',
+        'commessa', 'horario', 'equipe', 'veiculo', 'turno', 'area_atuacao',
+        'subgrupo', 'cnh', 'filial', 'dt_admissao', 'dt_demissao', 'sit_folha',
+        'possui_periculosidade', 'diretoria', 'centro_custo', 'classe_custo',
+        'segmento', 'departamento', 'gestor', 'coordenador', 'supervisor',
+        'exp_1_periodo', 'exp_2_periodo', 'nro_cnh', 'categoria_cnh', 'logradouro',
+        'endereco', 'nro_endereco', 'bairro', 'telefone', 'celular', 'cpf',
+        'centro_custo_alpitel', 'comessa_alpitel', 'dt_retorno_ferias', 'nro_cracha'
+      ];
+
+      const payload = {};
+      validColumns.forEach(col => {
+        if (updatedEmp[col] !== undefined) {
+          payload[col] = updatedEmp[col];
+        }
+      });
+      payload.updated_at = new Date().toISOString();
+
       await supabase.from('base_unificada').upsert(payload, { onConflict: 'matricula' });
       showNotification(`Perfil de ${updatedEmp.nome} atualizado com sucesso!`);
     } catch (e) {
@@ -2533,18 +2551,27 @@ export default function ForcaTrabalhoModule({ currentUser, userPermissions, vehi
   // FASE 3: SISTEMA DE AUDITORIA (LOG)
   // ==========================================
   const logAudit = useCallback((entry) => {
+    const numericUserId = typeof currentUser?.id === 'number' && !isNaN(currentUser.id) ? Number(currentUser.id) : null;
+    const userName = currentUser?.nome || currentUser?.login || 'Sistema';
+
     const newEntryLocal = {
       id: Date.now(),
       created_at: new Date().toISOString(),
-      usuario_id: currentUser?.id || null,
-      usuario_nome: currentUser?.nome || 'Sistema',
+      usuario_id: numericUserId,
+      usuario_nome: userName,
       ...entry
     };
     
     const dbPayload = {
-      usuario_id: currentUser?.id || null,
-      usuario_nome: currentUser?.nome || 'Sistema',
-      ...entry
+      usuario_id: numericUserId,
+      usuario_nome: userName,
+      tipo_acao: entry.tipo_acao || 'ACAO',
+      entidade_tipo: entry.entidade_tipo || 'base_unificada',
+      entidade_id: entry.entidade_id ? String(entry.entidade_id) : null,
+      campo_alterado: entry.campo_alterado || null,
+      valor_anterior: entry.valor_anterior !== undefined ? String(entry.valor_anterior) : null,
+      valor_novo: entry.valor_novo !== undefined ? String(entry.valor_novo) : null,
+      detalhes: entry.detalhes || ''
     };
 
     setAuditLog(prev => {
@@ -2552,8 +2579,10 @@ export default function ForcaTrabalhoModule({ currentUser, userPermissions, vehi
       localStorage.setItem('fleet_forca_audit_log', JSON.stringify(updated));
       return updated;
     });
-    // Tentar sync com Supabase sem enviar id/created_at (deixa o banco gerenciar)
-    supabase.from('forca_audit_log').insert(dbPayload).then(() => {}).catch(() => {});
+    // Tentar sync com Supabase
+    supabase.from('forca_audit_log').insert(dbPayload).then(() => {}).catch((err) => {
+      console.warn('[Audit Log] Sync warning:', err);
+    });
   }, [currentUser]);
 
   // ==========================================
