@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -13,7 +13,7 @@ import {
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { supabase } from '../supabaseClient';
-import { Navigation, Route, Eye, EyeOff } from 'lucide-react';
+import { Navigation, Route, Eye, EyeOff, Users, Layers, CheckSquare, Square } from 'lucide-react';
 
 // Fix for default leaflet icons in React
 delete L.Icon.Default.prototype._getIconUrl;
@@ -94,14 +94,40 @@ const createRouteIcon = (label, color) => {
 };
 
 // MapController component to automatically pan and zoom Leaflet map to bounds of visible points
-function MapController({ points }) {
+function MapController({ points, dateStr, selectedBucketName }) {
   const map = useMap();
+  const hasCenteredRef = useRef(false);
+  const lastFilterRef = useRef('');
+
   useEffect(() => {
-    if (points && points.length > 0) {
-      const bounds = L.latLngBounds(points);
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+    const key = `${dateStr}_${selectedBucketName || ''}`;
+    if (lastFilterRef.current !== key) {
+      lastFilterRef.current = key;
+      hasCenteredRef.current = false;
+    }
+  }, [dateStr, selectedBucketName]);
+
+  useEffect(() => {
+    if (!hasCenteredRef.current && points && points.length > 0 && map) {
+      const runFit = () => {
+        try {
+          const bounds = L.latLngBounds(points);
+          if (bounds && bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+            hasCenteredRef.current = true;
+          }
+        } catch (err) {
+          console.warn('[MapController] fitBounds warning:', err);
+        }
+      };
+      if (typeof map.whenReady === 'function') {
+        map.whenReady(runFit);
+      } else {
+        runFit();
+      }
     }
   }, [points, map]);
+
   return null;
 }
 
@@ -118,7 +144,33 @@ export default function WFMMapView({
 }) {
   const center = [-23.5505, -46.6333];
   const [telemetryLogs, setTelemetryLogs] = useState([]);
-  const [showGpsBreadcrumbs, setShowGpsBreadcrumbs] = useState(true);
+  const [showGpsBreadcrumbs, setShowGpsBreadcrumbs] = useState(false);
+  const [selectedAuditorLogins, setSelectedAuditorLogins] = useState(null);
+  const [showInspectorLayerBox, setShowInspectorLayerBox] = useState(false);
+
+  // Initialize selected logins when auditors load
+  useEffect(() => {
+    if (auditors && auditors.length > 0 && selectedAuditorLogins === null) {
+      setSelectedAuditorLogins(new Set(auditors.map(a => a.login)));
+    }
+  }, [auditors, selectedAuditorLogins]);
+
+  const toggleAuditorLayer = (login) => {
+    setSelectedAuditorLogins(prev => {
+      const current = prev ? new Set(prev) : new Set(auditors.map(a => a.login));
+      if (current.has(login)) current.delete(login);
+      else current.add(login);
+      return current;
+    });
+  };
+
+  const selectAllAuditors = () => {
+    setSelectedAuditorLogins(new Set(auditors.map(a => a.login)));
+  };
+
+  const clearAllAuditors = () => {
+    setSelectedAuditorLogins(new Set());
+  };
 
   // Busca o histórico de telemetria GPS gravado pelos auditores para a data selecionada
   useEffect(() => {
@@ -127,14 +179,28 @@ export default function WFMMapView({
 
     const fetchGpsLogs = async () => {
       try {
-        const { data, error } = await supabase
-          .from('autofiscalizacao_gps_logs')
-          .select('*')
-          .eq('date', dateStr)
-          .order('created_at', { ascending: true });
+        let allLogs = [];
+        let page = 0;
+        let hasMore = true;
+        while (hasMore && isMounted) {
+          const { data, error } = await supabase
+            .from('autofiscalizacao_gps_logs')
+            .select('*')
+            .eq('date', dateStr)
+            .order('created_at', { ascending: true })
+            .range(page * 1000, (page + 1) * 1000 - 1);
 
-        if (isMounted && data && !error) {
-          setTelemetryLogs(data);
+          if (error || !data) break;
+          allLogs = allLogs.concat(data);
+          if (data.length < 1000) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        }
+
+        if (isMounted) {
+          setTelemetryLogs(allLogs);
         }
       } catch (err) {
         console.warn('[WFMMapView] Aviso ao buscar telemetria de GPS:', err);
@@ -268,6 +334,63 @@ export default function WFMMapView({
           {showGpsBreadcrumbs ? <Eye size={13} /> : <EyeOff size={13} />}
           <span>{showGpsBreadcrumbs ? 'Visível' : 'Oculto'}</span>
         </button>
+
+        <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
+
+        <button
+          type="button"
+          onClick={() => setShowInspectorLayerBox(!showInspectorLayerBox)}
+          className={`px-3 py-1 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-xs ${
+            showInspectorLayerBox
+              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200'
+          }`}
+        >
+          <Layers size={13} />
+          <span>Camadas por Inspetor ({selectedAuditorLogins ? selectedAuditorLogins.size : auditorsToShow.length})</span>
+        </button>
+
+        {/* Dropdown Box of Inspector Checkboxes */}
+        {showInspectorLayerBox && (
+          <div className="absolute top-12 left-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 w-64 space-y-2 z-[1100]">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+              <span className="text-xs font-black text-slate-800 dark:text-slate-100 uppercase tracking-wider flex items-center gap-1">
+                <Users size={13} className="text-blue-500" /> Inspetores
+              </span>
+              <div className="flex items-center gap-1 text-[9px] font-bold">
+                <button onClick={selectAllAuditors} className="text-blue-600 hover:underline uppercase">Todos</button>
+                <span className="text-slate-300">•</span>
+                <button onClick={clearAllAuditors} className="text-slate-400 hover:underline uppercase">Nenhum</button>
+              </div>
+            </div>
+
+            <div className="max-h-48 overflow-y-auto space-y-1 custom-scrollbar pr-1">
+              {auditorsToShow.map((auditor, idx) => {
+                const isChecked = !selectedAuditorLogins || selectedAuditorLogins.has(auditor.login);
+                const color = routeColors[idx % routeColors.length];
+                const count = telemetryLogs.filter(l => l.auditor === auditor.login || l.auditor?.toLowerCase() === auditor.login?.toLowerCase() || l.auditor === auditor.nome).length;
+
+                return (
+                  <div
+                    key={auditor.login}
+                    onClick={() => toggleAuditorLayer(auditor.login)}
+                    className={`flex items-center justify-between p-1.5 rounded-xl cursor-pointer transition-colors text-xs ${
+                      isChecked ? 'bg-blue-50/60 dark:bg-blue-950/40 text-slate-800 dark:text-slate-100' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: color }} />
+                      <span className="font-bold truncate">{auditor.nome || auditor.login}</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded shrink-0">
+                      {count} pts
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
@@ -298,7 +421,7 @@ export default function WFMMapView({
           </LayersControl.BaseLayer>
         </LayersControl>
 
-        <MapController points={allActivePoints} />
+        <MapController points={allActivePoints} dateStr={dateStr} selectedBucketName={selectedBucketName} />
 
         {/* Auditor Homes */}
         {auditorsToShow.map((auditor) => {
@@ -359,7 +482,7 @@ export default function WFMMapView({
 
         {/* 🗺️ TRILHA HISTÓRICA REAL DE GPS (MICRO-PONTOS DELICADOS + POLYLINES SUAVES) */}
         {showGpsBreadcrumbs &&
-          auditorsToShow.map((auditor, i) => {
+          auditorsToShow.filter(auditor => !selectedAuditorLogins || selectedAuditorLogins.has(auditor.login)).map((auditor, i) => {
             const routeColor = routeColors[i % routeColors.length];
             const logsForAuditor = telemetryLogs.filter(
               (l) =>

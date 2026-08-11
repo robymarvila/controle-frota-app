@@ -3705,7 +3705,9 @@ function MatrizAcessosView({ currentUser, onUpdateConfigAcessos, showFeedback })
     { id: 'pode_editar_acessos', label: 'Gerir Acessos (Usuários e Matriz)' },
     { id: 'pode_alterar_etapa_manual', label: 'Alteração Manual de Etapa (Gestão)' },
     { id: 'pode_concluir_chamado_oficina', label: 'Concluir Manutenção Oficina (Interna / Externa)' },
-    { id: 'pode_movimentar_oficinas', label: 'Movimentar Veículos entre Oficinas (Interna ⇄ Externa)' }
+    { id: 'pode_movimentar_oficinas', label: 'Movimentar Veículos entre Oficinas (Interna ⇄ Externa)' },
+    { id: 'pode_configurar_buckets', label: 'WFM: Configurar / Gerenciar Buckets (Hierarquia, Inativação e Exclusão)' },
+    { id: 'pode_editar_os_wfm', label: 'WFM: Editar OS / Atividades' }
   ];
 
   const PERMISSOES_EXTRA_FORCA = [

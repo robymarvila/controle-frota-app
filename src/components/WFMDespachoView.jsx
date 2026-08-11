@@ -1,10 +1,23 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 
+const buildCleanOrFilter = (osObj, targetOsId) => {
+  const parts = [];
+  if (osObj?.id && typeof osObj.id === 'string' && osObj.id.trim().length > 0) {
+    parts.push(`id.eq.${osObj.id.trim()}`);
+  }
+  if (targetOsId && typeof targetOsId === 'string' && targetOsId.trim().length > 0 && targetOsId !== '--') {
+    parts.push(`id_origem.eq.${targetOsId.trim()}`);
+    parts.push(`payload_dados->>osid.eq.${targetOsId.trim()}`);
+  }
+  return parts.join(',') || 'id.neq.00000000-0000-0000-0000-000000000000';
+};
+
 import { supabase } from '../supabaseClient';
 
 import WFMScreen from './WFMScreen';
 
 import ModalDetalhesOS from './ModalDetalhesOS';
+import ModalEditarOS from './ModalEditarOS';
 
 
 
@@ -29,6 +42,7 @@ export default function WFMDespachoView({ currentUser, activeRegional }) {
   const [escalas, setEscalas] = useState([]);
 
   const [viewingOSDetails, setViewingOSDetails] = useState(null);
+  const [editingTask, setEditingTask] = useState(null);
 
   const [selectedDate, setSelectedDate] = useState(new Date());
 
@@ -492,19 +506,29 @@ export default function WFMDespachoView({ currentUser, activeRegional }) {
 
     
 
-    const { error } = await supabase.from('wfm_tarefas').update({
+    const targetId = updated.id || fa.id;
+    const targetOsNumber = updated.osid || updated.os_numero || updated.payload_dados?.osid || fa.osid || fa.nr_ordem || fa.payload_dados?.osid;
 
-      auditor: updated.auditor,
+    let updateQuery = null;
+    if (targetId) {
+      updateQuery = supabase.from('wfm_tarefas').update({
+        auditor: updated.auditor,
+        assigned_date: updated.assigned_date,
+        planned_start: updated.planned_start,
+        status: updated.status,
+        historico: updated.historico
+      }).eq('id', targetId);
+    } else if (targetOsNumber) {
+      updateQuery = supabase.from('wfm_tarefas').update({
+        auditor: updated.auditor,
+        assigned_date: updated.assigned_date,
+        planned_start: updated.planned_start,
+        status: updated.status,
+        historico: updated.historico
+      }).or(buildCleanOrFilter(fa, targetOsNumber));
+    }
 
-      assigned_date: updated.assigned_date,
-
-      planned_start: updated.planned_start,
-
-      status: updated.status,
-
-      historico: updated.historico
-
-    }).eq('id', updated.id);
+    const { error } = updateQuery ? await updateQuery : { error: null };
 
 
 
@@ -696,6 +720,17 @@ export default function WFMDespachoView({ currentUser, activeRegional }) {
 
 
 
+      {editingTask && (
+        <ModalEditarOS
+          os={editingTask}
+          auditors={colaboradoresList}
+          onClose={() => setEditingTask(null)}
+          onSaveSuccess={() => {
+            setEditingTask(null);
+            if (typeof fetchData === 'function') fetchData();
+          }}
+        />
+      )}
       {viewingOSDetails && (
 
         <ModalDetalhesOS
@@ -712,7 +747,14 @@ export default function WFMDespachoView({ currentUser, activeRegional }) {
 
           fieldAudits={fieldAudits}
 
-          auditors={colaboradoresList}
+          auditors={(colaboradoresList || []).filter(c => {
+            const p = String(c.cargo || c.perfil || '').toLowerCase();
+            return p.includes('auditor') || p.includes('inspetor');
+          }).filter(c => !escalas || escalas.length === 0 || escalas.some(e => e.auditor === c.login || e.auditor === c.email || e.auditor === c.nome))}
+          onEditOS={(osToEdit) => {
+            setViewingOSDetails(null);
+            setEditingTask(osToEdit);
+          }}
 
           onAssignAudit={handleAssignAudit}
 

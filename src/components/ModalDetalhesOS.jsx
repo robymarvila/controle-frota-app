@@ -1,5 +1,18 @@
-import React from 'react';
-import { X, Clock, Navigation, MapPin, CheckCircle2, Zap, FileText, Download, List, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Clock, Navigation, MapPin, CheckCircle2, Zap, FileText, Download, List, AlertTriangle, RotateCcw } from 'lucide-react';
+import { supabase } from '../supabaseClient';
+
+const buildCleanOrFilter = (osObj, targetOsId) => {
+  const parts = [];
+  if (osObj?.id && typeof osObj.id === 'string' && osObj.id.trim().length > 0) {
+    parts.push(`id.eq.${osObj.id.trim()}`);
+  }
+  if (targetOsId && typeof targetOsId === 'string' && targetOsId.trim().length > 0 && targetOsId !== '--') {
+    parts.push(`id_origem.eq.${targetOsId.trim()}`);
+    parts.push(`payload_dados->>osid.eq.${targetOsId.trim()}`);
+  }
+  return parts.join(',') || 'id.neq.00000000-0000-0000-0000-000000000000';
+};
 
 const fmtDateBR = (dStr) => {
   if (!dStr) return '--';
@@ -21,11 +34,65 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
 
   const [selectedAuditor, setSelectedAuditor] = React.useState(os?.auditor || '');
   const [isAssigning, setIsAssigning] = React.useState(false);
+  const [liveLogs, setLiveLogs] = useState([]);
 
   // Resolve properties with cross-table hydration
   const isWfmTask = !!os.payload_dados;
   const rawDataPayload = isWfmTask ? os.payload_dados : os;
   const osId = rawDataPayload.osid || rawDataPayload.nr_ordem || os.id_origem || os.osid || '--';
+
+  useEffect(() => {
+    if (!osId || osId === '--') return;
+    const fetchLiveHistory = async () => {
+      try {
+        const logs = [];
+
+        // 1. Fetch from wfm_tarefas
+        const cleanOr = buildCleanOrFilter(os, osId);
+        if (cleanOr) {
+          const { data: wfmTasks } = await supabase
+            .from('wfm_tarefas')
+            .select('historico')
+            .or(cleanOr);
+
+          if (wfmTasks) {
+            wfmTasks.forEach(t => {
+              if (Array.isArray(t.historico)) logs.push(...t.historico);
+            });
+          }
+        }
+
+        // 2. Fetch from autofiscalizacao_workflows
+        const { data: wfTasks } = await supabase
+          .from('autofiscalizacao_workflows')
+          .select('historico')
+          .eq('osid', osId);
+
+        if (wfTasks) {
+          wfTasks.forEach(w => {
+            if (Array.isArray(w.historico)) logs.push(...w.historico);
+          });
+        }
+
+        // 3. Fetch from autofiscalizacao_inspecoes
+        const { data: inspTasks } = await supabase
+          .from('autofiscalizacao_inspecoes')
+          .select('historico')
+          .eq('osid', osId);
+
+        if (inspTasks) {
+          inspTasks.forEach(i => {
+            if (Array.isArray(i.historico)) logs.push(...i.historico);
+          });
+        }
+
+        setLiveLogs(logs);
+      } catch (e) {
+        console.warn('Erro ao buscar historico em tempo real:', e);
+      }
+    };
+    fetchLiveHistory();
+  }, [osId, os.id]);
 
   // Cross-reference matched objects across loaded datasets
   const matchedOrdem = ordens.find(o => o.nr_ordem === osId || o.osid === osId) || {};
@@ -260,7 +327,7 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
                         ...(os.historico || []),
                         { acao: 'WFM_DESALOCACAO', usuario: 'Operador', timestamp: new Date().toISOString(), observacao: logMsg }
                       ]
-                    }).or(`os_numero.eq.${osId},id_origem.eq.${osId},id.eq.${os.id || ''}`);
+                    }).or(buildCleanOrFilter(os, osId));
 
                     await supabase.from('autofiscalizacao_workflows').update({
                       auditor: null,
@@ -463,7 +530,29 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
               </button>
             )}
 
-            {onAssignAudit && auditors.length > 0 && (
+            {auditorName && status !== 'completed' && status !== 'concluido' && onAssignAudit && (
+              <button 
+                onClick={async () => {
+                  if (confirm('Deseja realmente DESPROGRAMAR esta OS do auditor?')) {
+                    setIsAssigning(true);
+                    try {
+                      await onAssignAudit(os, '', null, null);
+                      alert('OS desprogramada e devolvida ao Bucket com sucesso!');
+                    } catch(e) {
+                      alert('Erro ao desprogramar: ' + e.message);
+                    } finally {
+                      setIsAssigning(false);
+                      onClose();
+                    }
+                  }
+                }}
+                className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-all"
+              >
+                Desprogramar OS
+              </button>
+            )}
+
+            {onAssignAudit && (
               <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
                 <select
                   value={selectedAuditor}

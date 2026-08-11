@@ -5,8 +5,10 @@ import { History, ChevronLeft, ChevronRight, Settings, MapPin, Clock, Filter, Al
 import WFMMapView from './WFMMapView';
 
 import WFMBucketTree from './WFMBucketTree';
+import ModalHistoricoBuckets from './ModalHistoricoBuckets';
 
 import ModalDetalhesOS from './ModalDetalhesOS';
+import ModalEditarOS from './ModalEditarOS';
 
 import { supabase } from '../supabaseClient';
 
@@ -217,10 +219,75 @@ export default function WFMScreen({
   const [showCalendarModal, setShowCalendarModal] = useState(false);
 
   const [selectedBucketName, setSelectedBucketName] = useState('');
+  const [isBucketConfigMode, setIsBucketConfigMode] = useState(false);
+  const [showInactiveBuckets, setShowInactiveBuckets] = useState(false);
+  const [bucketStatuses, setBucketStatuses] = useState(() => {
+    try {
+      const cached = localStorage.getItem('fleet_wfm_bucket_statuses');
+      return cached ? JSON.parse(cached) : {};
+    } catch(e) { return {}; }
+  });
+  const [bucketHistoryLogs, setBucketHistoryLogs] = useState(() => {
+    try {
+      const cached = localStorage.getItem('fleet_wfm_bucket_history_logs');
+      return cached ? JSON.parse(cached) : [];
+    } catch(e) { return []; }
+  });
+  const [showBucketHistoryModal, setShowBucketHistoryModal] = useState(false);
+
+  const handleToggleBucketStatus = (bucketName) => {
+    setBucketStatuses(prev => {
+      const current = prev[bucketName] || 'ATIVO';
+      const next = current === 'ATIVO' ? 'INATIVO' : 'ATIVO';
+      const updated = { ...prev, [bucketName]: next };
+      try { localStorage.setItem('fleet_wfm_bucket_statuses', JSON.stringify(updated)); } catch(e) {}
+      
+      const newLog = {
+        id: Date.now(),
+        bucket_nome: bucketName,
+        acao: next === 'INATIVO' ? 'INATIVACAO' : 'REATIVACAO',
+        detalhes: next === 'INATIVO' ? 'Bucket inativado temporariamente' : 'Bucket reativado',
+        usuario: currentUser?.nome || currentUser?.login || 'Operador',
+        created_at: new Date().toISOString()
+      };
+      setBucketHistoryLogs(prevLogs => {
+        const newLogs = [newLog, ...prevLogs];
+        try { localStorage.setItem('fleet_wfm_bucket_history_logs', JSON.stringify(newLogs)); } catch(e) {}
+        return newLogs;
+      });
+
+      return updated;
+    });
+  };
+
+  const handleDeleteBucket = (bucketName) => {
+    if (!confirm('Deseja realmente excluir/inativar permanentemente este Bucket?')) return;
+    setBucketStatuses(prev => {
+      const updated = { ...prev, [bucketName]: 'INATIVO' };
+      try { localStorage.setItem('fleet_wfm_bucket_statuses', JSON.stringify(updated)); } catch(e) {}
+      
+      const newLog = {
+        id: Date.now(),
+        bucket_nome: bucketName,
+        acao: 'EXCLUSAO',
+        detalhes: 'Bucket excluído pelo usuário',
+        usuario: currentUser?.nome || currentUser?.login || 'Operador',
+        created_at: new Date().toISOString()
+      };
+      setBucketHistoryLogs(prevLogs => {
+        const newLogs = [newLog, ...prevLogs];
+        try { localStorage.setItem('fleet_wfm_bucket_history_logs', JSON.stringify(newLogs)); } catch(e) {}
+        return newLogs;
+      });
+
+      return updated;
+    });
+  };
 
   const [searchQuery, setSearchQuery] = useState('');
 
   const [selectedSearchOS, setSelectedSearchOS] = useState(null);
+  const [editingTask, setEditingTask] = useState(null);
 
   const [listMode, setListMode] = useState('grid'); // 'grid' or 'list'
 
@@ -3310,6 +3377,16 @@ export default function WFMScreen({
 
       {/* ── MODAL DE DETALHES DO ATENDIMENTO COM ALOCAÇÃO ── */}
 
+      {editingTask && (
+        <ModalEditarOS
+          os={editingTask}
+          auditors={escalas.length === 0 ? auditors : auditors.filter(a => escalas.some(e => e.auditor === a.login || e.auditor === a.email || e.auditor === a.nome))}
+          onClose={() => setEditingTask(null)}
+          onSaveSuccess={() => {
+            setEditingTask(null);
+          }}
+        />
+      )}
       {selectedSearchOS && (
 
         <ModalDetalhesOS
@@ -3326,7 +3403,7 @@ export default function WFMScreen({
 
           fieldAudits={fieldAudits}
 
-          auditors={auditors}
+          auditors={escalas.length === 0 ? auditors : auditors.filter(a => escalas.some(e => e.auditor === a.login || e.auditor === a.email || e.auditor === a.nome))}
 
           onAssignAudit={onAssignAudit}
 
@@ -3696,7 +3773,28 @@ function ActivityModal({ auditorLogin, dateStr, onClose, onSave }) {
 
   const [comentario, setComentario] = useState('');
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    let lat = null;
+    let lng = null;
+
+    const rawEnd = (categoria === 'Fiscalização de OS' ? `${rua || ''} ${numero || ''}, ${bairro || ''}, ${cidade || ''} - ${estado || ''}` : enderecoOutros || enderecoClienteAF || '');
+    const cleanSearchAddress = rawEnd.replace(/Apt\/Comp:\s*[^-\n,]+/gi, '').replace(/\s+/g, ' ').trim();
+
+    if (cleanSearchAddress.length > 5) {
+      try {
+        const geoUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanSearchAddress + ', Brazil')}`;
+        const geoRes = await fetch(geoUrl, { headers: { 'User-Agent': 'FleetOperacaoApp/1.0' } });
+        if (geoRes.ok) {
+          const geoData = await geoRes.json();
+          if (Array.isArray(geoData) && geoData.length > 0) {
+            lat = parseFloat(geoData[0].lat);
+            lng = parseFloat(geoData[0].lon);
+          }
+        }
+      } catch (e) {
+        console.warn('[WFM] Geocoding error:', e);
+      }
+    }
 
     const s = new Date(`${dateStr}T${start}:00-03:00`);
 
@@ -4357,6 +4455,8 @@ function NovaAtividadeAvulsaModal({ onClose, onSave }) {
   const handleSave = () => {
 
     let payload = {
+      latitude: lat,
+      longitude: lng,
 
       qtd_anexos: parseInt(qtdAnexos) || 0,
 

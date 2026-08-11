@@ -58,6 +58,7 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
   
   // Forms state
   const [modalMode, setModalMode] = useState('Interna');
+  const [selectedImagePreview, setSelectedImagePreview] = useState(null);
   const [diagnostico, setDiagnostico] = useState('');
   const [pecas, setPecas] = useState('');
   const [oficinaExterna, setOficinaExterna] = useState('');
@@ -691,33 +692,144 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
         </div>
       </div>
 
-      {/* ── MODAL DE DETALHES E COMENTÁRIOS ── */}
-      {detailChamado && (
+            {/* ── MODAL DE DETALHES E COMENTÁRIOS ── */}
+      {detailChamado && (() => {
+        const vec = getVehicle(detailChamado.placa);
+        const fotos = detailChamado.dadosWorkflow?.fotosChamado || detailChamado.fotosChamado || {};
+        const fotosArr = Object.entries(fotos).filter(([_, url]) => !!url);
+        const defeitos = detailChamado.defeitos || [];
+        const historico = detailChamado.historicoModificacoes || [];
+        const totalDef = defeitos.length;
+        const resolvedDef = defeitos.filter(d => d.status === 'RESOLVIDO').length;
+
+        return (
         <div className="fixed inset-0 z-50 flex justify-center items-end sm:items-center bg-slate-900/40 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-300">
           <div className="bg-white/95 backdrop-blur-2xl w-full sm:max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8">
-            <div className="p-6 bg-white/80 border-b border-slate-100 flex justify-between items-center sticky top-0 z-10 backdrop-blur-xl">
+            {/* Header */}
+            <div className="p-6 bg-slate-900 flex justify-between items-center sticky top-0 z-10">
               <div>
-                <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest block mb-1">Detalhes do Chamado</span>
-                <h3 className="text-3xl font-black text-slate-800 tracking-tight">{detailChamado.placa}</h3>
+                <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest block mb-1">Detalhes do Chamado</span>
+                <h3 className="text-3xl font-black text-white tracking-tight">{detailChamado.placa}</h3>
+                <p className="text-xs text-slate-400 font-bold mt-0.5">{vec.marca || '--'} • {vec.subTipo || vec.tipo || '--'}</p>
               </div>
-              <button onClick={() => setDetailChamado(null)} className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"><X size={24}/></button>
+              <button onClick={() => setDetailChamado(null)} className="p-2.5 bg-white/10 rounded-full text-white hover:bg-rose-500 transition-colors"><X size={24}/></button>
             </div>
             
             <div className="p-6 overflow-y-auto space-y-6 flex-1 hide-scrollbar">
-              {/* Defeitos */}
+              
+              {/* Informações Gerais do Chamado */}
+              <div className="space-y-3">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <FileText size={16}/> Informações do Chamado
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Código</p>
+                    <p className="text-sm font-black text-slate-800 mt-0.5">{detailChamado.codigoChamado || detailChamado.numero || '--'}</p>
+                  </div>
+                  <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Status</p>
+                    <p className="text-sm font-black text-slate-800 mt-0.5">{detailChamado.situacaoVeiculo || detailChamado.status || '--'}</p>
+                  </div>
+                  <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Etapa</p>
+                    <p className="text-sm font-bold text-emerald-700 mt-0.5">{detailChamado.etapaWorkflow || '--'}</p>
+                  </div>
+                  <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Data Abertura</p>
+                    <p className="text-sm font-black text-slate-800 mt-0.5">{detailChamado.dataAbertura ? new Date(detailChamado.dataAbertura).toLocaleDateString('pt-BR') : '--'}</p>
+                  </div>
+                  {detailChamado.motorista && (
+                    <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100 col-span-2">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Motorista</p>
+                      <p className="text-sm font-black text-slate-800 mt-0.5">{detailChamado.motorista}</p>
+                    </div>
+                  )}
+                  {detailChamado.regional && (
+                    <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Regional</p>
+                      <p className="text-sm font-black text-slate-800 mt-0.5">{detailChamado.regional}</p>
+                    </div>
+                  )}
+                  {(detailChamado.oficinaDestino || detailChamado.oficinaExterna) && (
+                    <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Oficina</p>
+                      <p className="text-sm font-black text-slate-800 mt-0.5">{detailChamado.oficinaDestino || detailChamado.oficinaExterna}</p>
+                    </div>
+                  )}
+                </div>
+                {(detailChamado.defeitoEncontrado || detailChamado.defeitoPrincipal) && (
+                  <div className="bg-amber-50/80 border border-amber-200/50 p-3.5 rounded-2xl">
+                    <p className="text-[9px] font-black text-amber-600 uppercase tracking-wider mb-1">Defeito Principal</p>
+                    <p className="text-sm font-bold text-amber-900">{detailChamado.defeitoEncontrado || detailChamado.defeitoPrincipal}</p>
+                  </div>
+                )}
+                {detailChamado.dadosWorkflow?.diagnostico && (
+                  <div className="bg-blue-50/80 border border-blue-200/50 p-3.5 rounded-2xl">
+                    <p className="text-[9px] font-black text-blue-600 uppercase tracking-wider mb-1">Diagnóstico</p>
+                    <p className="text-sm font-bold text-blue-900">{detailChamado.dadosWorkflow.diagnostico}</p>
+                  </div>
+                )}
+                {detailChamado.dadosWorkflow?.pecasNecessarias && (
+                  <div className="bg-purple-50/80 border border-purple-200/50 p-3.5 rounded-2xl">
+                    <p className="text-[9px] font-black text-purple-600 uppercase tracking-wider mb-1">Peças Necessárias</p>
+                    <p className="text-sm font-bold text-purple-900">{detailChamado.dadosWorkflow.pecasNecessarias}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Fotos do Chamado */}
+              {fotosArr.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <Eye size={16}/> Fotos do Chamado ({fotosArr.length})
+                  </h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    {fotosArr.map(([key, url]) => (
+                      <div key={key} className="relative rounded-2xl overflow-hidden border border-slate-200 shadow-sm group">
+                        <img src={url} alt={key} className="w-full h-32 object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer" onClick={() => setSelectedImagePreview({ url, label: key === 'fotoVeiculo' ? 'Veículo' : key === 'fotoHodometro' ? 'Hodômetro' : key === 'fotoAdicional' ? 'Adicional' : key })} />
+                        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                          <p className="text-[9px] font-black text-white uppercase tracking-wider">
+                            {key === 'fotoVeiculo' ? 'Veículo' : key === 'fotoHodometro' ? 'Hodômetro' : key === 'fotoAdicional' ? 'Adicional' : key}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Defeitos Reportados */}
               <div className="space-y-4">
                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                  <AlertCircle size={16}/> Defeitos Reportados
+                  <AlertCircle size={16}/> Defeitos Reportados {totalDef > 0 && <span className="bg-slate-800 text-white px-2 py-0.5 rounded-lg text-[9px]">{resolvedDef}/{totalDef}</span>}
                 </h4>
-                {detailChamado.defeitos?.length > 0 ? (
+                {totalDef > 0 ? (
                   <div className="space-y-3">
-                    {detailChamado.defeitos.map((d, i) => (
-                      <div key={d.id || i} className="p-4 bg-slate-50/80 border border-slate-100 rounded-[1.5rem]">
-                        <p className="text-sm font-bold text-slate-800">{d.descricao}</p>
-                        <div className="flex gap-2 mt-2">
-                          <span className="text-[10px] font-black bg-white px-2.5 py-1 rounded-lg shadow-sm text-slate-500 uppercase tracking-wider">{d.categoria}</span>
-                          {d.status === 'RESOLVIDO' && <span className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-lg uppercase tracking-wider">Resolvido</span>}
+                    {defeitos.map((d, i) => (
+                      <div key={d.id || i} className="p-4 bg-slate-50/80 border border-slate-100 rounded-[1.5rem] space-y-2.5">
+                        <div className="flex justify-between items-start">
+                          <p className="text-sm font-bold text-slate-800 flex-1">{d.descricao || 'Sem descrição'}</p>
+                          <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider shrink-0 ml-2 ${d.status === 'RESOLVIDO' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {d.status || 'Pendente'}
+                          </span>
                         </div>
+                        <div className="flex gap-2 flex-wrap">
+                          {d.categoria && (
+                            <span className="text-[10px] font-black bg-white px-2.5 py-1 rounded-lg shadow-sm text-slate-500 uppercase tracking-wider">{d.categoria}</span>
+                          )}
+                          {d.dataResolucao && (
+                            <span className="text-[10px] font-bold text-emerald-600">Resolvido em {new Date(d.dataResolucao).toLocaleDateString('pt-BR')}</span>
+                          )}
+                        </div>
+                        {d.comentario && (
+                          <p className="text-xs text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-100 italic">{d.comentario}</p>
+                        )}
+                        {d.fotoDefeito && (
+                          <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+                            <img src={d.fotoDefeito} alt={`Defeito ${i + 1}`} className="w-full h-40 object-cover cursor-pointer hover:opacity-90 transition-opacity" onClick={() => setSelectedImagePreview({ url: d.fotoDefeito, label: `Defeito ${i + 1}` })} />
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -746,17 +858,24 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
                 </button>
               </div>
 
-              {/* Histórico Recente */}
-              {detailChamado.historicoModificacoes?.length > 0 && (
+              {/* Histórico Completo */}
+              {historico.length > 0 && (
                 <div className="space-y-4 pt-4 border-t border-slate-100">
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Histórico Recente</h4>
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <History size={16}/> Histórico Completo ({historico.length})
+                  </h4>
                   <div className="space-y-4">
-                    {detailChamado.historicoModificacoes.slice(0, 5).map((h, i) => (
+                    {historico.map((h, i) => (
                       <div key={h.id || i} className="flex gap-3 text-sm">
-                        <div className="w-2 h-2 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-                        <div>
+                        <div className="flex flex-col items-center">
+                          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0 mt-1.5" />
+                          {i < historico.length - 1 && <div className="w-px flex-1 bg-slate-200 mt-1" />}
+                        </div>
+                        <div className="pb-4">
                           <p className="font-bold text-slate-700">{h.descricao}</p>
-                          <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-wider">{h.usuario} • {new Date(h.dataHora).toLocaleDateString('pt-BR')} {new Date(h.dataHora).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'})}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-wider">
+                            {h.usuario} • {new Date(h.dataHora).toLocaleDateString('pt-BR')} {new Date(h.dataHora).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'})}
+                          </p>
                         </div>
                       </div>
                     ))}
@@ -766,7 +885,9 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
+
 
       {/* ── MODAL DE INICIAR DIAGNÓSTICO (Ação Análise) ── */}
       {selectedChamado && (
@@ -905,6 +1026,31 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
                   Liberar para Operação
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DE PREVIEW DE IMAGEM ── */}
+      {selectedImagePreview && (
+        <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/90 backdrop-blur-sm p-4 animate-in fade-in duration-300" onClick={() => setSelectedImagePreview(null)}>
+          <div className="relative max-w-4xl w-full max-h-[90vh] flex flex-col items-center justify-center">
+            <button 
+              onClick={(e) => { e.stopPropagation(); setSelectedImagePreview(null); }} 
+              className="absolute -top-12 right-0 p-2 bg-white/10 hover:bg-rose-500 rounded-full text-white transition-colors"
+            >
+              <X size={24}/>
+            </button>
+            <img 
+              src={selectedImagePreview.url} 
+              alt={selectedImagePreview.label} 
+              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()} 
+            />
+            <div className="absolute bottom-4 inset-x-0 flex justify-center pointer-events-none">
+              <span className="bg-black/60 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg backdrop-blur-md">
+                {selectedImagePreview.label}
+              </span>
             </div>
           </div>
         </div>
