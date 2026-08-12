@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { supabase } from '../supabaseClient';
 import { gpsService } from '../services/gpsService';
+import { permissionService } from '../services/permissionService';
 import { notificationService } from '../services/notificationService';
 
 import * as XLSX from 'xlsx';
@@ -435,19 +436,40 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
 
   const [loading, setLoading] = useState(true);
   
-  // ── Strict GPS Permission Block
+  // ── Strict GPS Permission Block (com re-verificação ao retornar das configurações)
   const [gpsBlocked, setGpsBlocked] = useState(false);
 
   useEffect(() => {
     let active = true;
+    let cleanupResume = null;
+
     const verifyGps = async () => {
       if (isMobileAuditor && gpsService.isNative()) {
         const hasPerm = await gpsService.checkStrictPermission();
         if (active) setGpsBlocked(!hasPerm);
       }
     };
+
     verifyGps();
-    return () => { active = false; };
+
+    // Re-verificar permissões quando o app retorna ao foreground (após usuário conceder nas configurações)
+    if (isMobileAuditor && gpsService.isNative()) {
+      cleanupResume = permissionService.onResume(async () => {
+        console.log('[AutoFiscalização] App retornou ao foreground — re-verificando permissões GPS...');
+        const hasPerm = await gpsService.checkStrictPermission();
+        if (active) {
+          setGpsBlocked(!hasPerm);
+          if (hasPerm) {
+            console.log('[AutoFiscalização] ✅ Permissão GPS concedida — desbloqueando tela');
+          }
+        }
+      });
+    }
+
+    return () => {
+      active = false;
+      if (cleanupResume) cleanupResume();
+    };
   }, [isMobileAuditor]);
 
   const canImportOS = useMemo(() => {

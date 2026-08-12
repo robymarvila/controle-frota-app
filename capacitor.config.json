@@ -11,7 +11,7 @@
       "backgroundMessage": "Rastreamento de telemetria operacional em andamento",
       "backgroundTitle": "Controle Operacional — Turno Ativo",
       "requestPermissions": true,
-      "stale": false,
+      "stale": true,
       "distanceFilter": 5
     }
   }

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
 import { 
   Search, Wrench, Home, Truck, CheckCircle2, ClipboardCheck, 
   AlertCircle, X, ChevronRight, PlayCircle, Eye, ShieldAlert,
@@ -132,9 +133,34 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
   };
 
   // Actions - Detalhes e Comentários
-  const handleOpenDetails = (chamado) => {
+  const handleOpenDetails = async (chamado) => {
     setDetailChamado(chamado);
     setNovoComentario('');
+
+    try {
+      const { data, error } = await supabase
+        .from('chamados')
+        .select('*')
+        .eq('id', chamado.id)
+        .maybeSingle();
+
+      if (data && !error) {
+        setDetailChamado(prev => {
+          if (prev && prev.id === chamado.id) {
+            return {
+              ...prev,
+              ...data,
+              fotosChamado: data.dadosWorkflow?.fotosChamado || data.fotosChamado || {},
+              defeitos: data.defeitos || [],
+              historicoModificacoes: data.historicoModificacoes || []
+            };
+          }
+          return prev;
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao buscar detalhes do chamado:', err);
+    }
   };
 
   const handleAddComment = () => {

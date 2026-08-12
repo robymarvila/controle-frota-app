@@ -63,6 +63,12 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
+        <!-- Foreground Service para GPS Background (Android 14+ exige foregroundServiceType) -->
+        <service
+            android:name="com.equimini.backgroundlocation.BackgroundGeolocationService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
+
     </application>
 
 </manifest>

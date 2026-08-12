@@ -48,6 +48,7 @@ import CustomFeedbackModal from './components/CustomFeedbackModal';
 import ModalTrocaSenhaObrigatoria from './components/ModalTrocaSenhaObrigatoria';
 import ModalDefinirSenhaProvisoria from './components/ModalDefinirSenhaProvisoria';
 import { normalizeKey, hashPassword, verifyPassword, validatePasswordStrength } from './utils/security';
+import { gpsService } from './services/gpsService';
 
 // --- CONFIGURAÇÕES E DADOS INICIAIS ---
 
@@ -894,7 +895,8 @@ export default function App() {
   const [users, setUsers] = useState(initialUsers);
   const [currentUser, setCurrentUser] = useState(() => {
     try {
-      const saved = sessionStorage.getItem('currentUser');
+      // Tenta localStorage primeiro (persistente para auditores), depois sessionStorage (fallback)
+      const saved = localStorage.getItem('currentUser') || sessionStorage.getItem('currentUser');
       return saved ? JSON.parse(saved) : null;
     } catch (e) {
       return null;
@@ -1070,6 +1072,7 @@ export default function App() {
         if (!updated) return;
         if (currentUser && (updated.userId === currentUser.id || updated.login === currentUser.login)) {
           if (updated.status === 'BLOQUEADO') {
+            localStorage.removeItem('currentUser');
             sessionStorage.removeItem('currentUser');
             setCurrentUser(null);
             showFeedback('blocked', 'Acesso Revogado', 'Seu acesso foi temporariamente suspenso pela administração.');
@@ -1086,7 +1089,7 @@ export default function App() {
           };
           delete refreshedUser.senha;
           setCurrentUser(refreshedUser);
-          sessionStorage.setItem('currentUser', JSON.stringify(refreshedUser));
+          // Persistência é gerenciada pelo useEffect [currentUser]
         }
       })
       .subscribe();
@@ -1228,6 +1231,20 @@ export default function App() {
       temAcessoLiberado: false
     };
   }, [currentUser, configAcessos]);
+  const podeFinalizarChamado = useMemo(() => {
+    if (!currentUser) return false;
+    const perfilNorm = (currentUser.perfil || '').trim().toUpperCase();
+    const setorNorm = (currentUser.setor || '').trim().toUpperCase();
+    
+    if (perfilNorm === 'FROTA' || perfilNorm === 'MECANICO') return false;
+    if (setorNorm === 'FROTA') return false;
+    
+    const isMasterAdmin = perfilNorm === 'ADMINISTRADOR' || currentUser.isAdmin === true;
+    const isGerenteOrCoord = ['GERENTE', 'COORDENADOR', 'SUPERVISOR', 'LIDER', 'ANALISTA', 'SUPERVISAO', 'COORDENACAO', 'GERENCIA'].includes(perfilNorm);
+    const isSetorOperacoes = setorNorm.includes('OPERAC') || setorNorm.includes('OPERAÇ');
+    
+    return isMasterAdmin || isGerenteOrCoord || isSetorOperacoes || !currentUser.setor;
+  }, [currentUser]);
 
 
 
@@ -1764,8 +1781,19 @@ export default function App() {
 
   useEffect(() => { 
     if (currentUser) {
-      sessionStorage.setItem('currentUser', JSON.stringify(currentUser)); 
+      const perfilUpper = (currentUser.perfil || '').trim().toUpperCase();
+      const setorUpper = (currentUser.setor || '').trim().toUpperCase();
+      const isAuditor = ['AUDITOR', 'INSPETOR', 'AUTOFISCALIZACAO', 'CAMPO'].includes(perfilUpper) || ['AUTOFISCALIZAÇÃO', 'AUTOFISCALIZACAO'].includes(setorUpper);
+      
+      if (isAuditor) {
+        // Auditores: localStorage (persistente — sobrevive a WebView destruída pelo Android)
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+      } else {
+        // Demais perfis: sessionStorage (limpa ao fechar o navegador/tab)
+        sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
+      }
     } else {
+      localStorage.removeItem('currentUser');
       sessionStorage.removeItem('currentUser');
     }
     if (currentUser?.id || currentUser?.login) {
@@ -1816,6 +1844,7 @@ export default function App() {
       const dbUser = users.find(u => u.id === currentUser.id);
       if (dbUser) {
         if (dbUser.status === 'BLOQUEADO') {
+          localStorage.removeItem('currentUser');
           sessionStorage.removeItem('currentUser');
           setCurrentUser(null);
           showFeedback('blocked', 'Acesso Revogado', 'Seu acesso foi temporariamente suspenso pela administração.');
@@ -1837,7 +1866,7 @@ export default function App() {
           };
           delete refreshed.senha;
           setCurrentUser(refreshed);
-          sessionStorage.setItem('currentUser', JSON.stringify(refreshed));
+          // Persistência é gerenciada pelo useEffect [currentUser]
         }
       }
     }
@@ -1964,7 +1993,7 @@ export default function App() {
 
       setCurrentUser(userSession);
       setActiveRegional((['Global'].includes(userSession.regional) || ['ADMINISTRADOR', 'GERENTE'].includes(userSession.perfil)) ? 'Todas' : (userSession.regional || 'Norte'));
-      sessionStorage.setItem('currentUser', JSON.stringify(userSession));
+      // Persistência é gerenciada pelo useEffect [currentUser] — salva em localStorage para auditores, sessionStorage para demais
 
       // Atualizar lista local de usuários
       setUsers(prev => {
@@ -2208,6 +2237,7 @@ export default function App() {
       const uId = currentUser.id || currentUser.login;
       sessionStorage.removeItem('welcome_modal_dismissed_' + uId);
     }
+    localStorage.removeItem('currentUser');
     sessionStorage.removeItem('currentUser');
     setCurrentUser(null);
     setIsWelcomeModalOpen(false);
@@ -2251,11 +2281,24 @@ export default function App() {
     if (isAuditorUser) {
       // ═════════════════════════════════════════════════════════════════════
       // 🛡️ REGRA ESPECIAL PARA AUDITORES: Sem deslogar ao longo do dia!
+      // GPS tracking ativo conta como atividade (evita falso "inativo")
+      // Se turno ativo (GPS rastreando), sessão NUNCA expira sozinha
       // ═════════════════════════════════════════════════════════════════════
       console.log('[Sessão Auditor] Modo de Sessão Contínua Ativo (Sem timeout de 1h)');
       let lastCheckedDay = new Date().getDate();
 
       midnightCheckInterval = setInterval(() => {
+        // Se o GPS está rastreando ativamente, considerar como atividade
+        const gpsLastTime = gpsService.getLastRecordedTime();
+        if (gpsLastTime && (Date.now() - gpsLastTime) < 300000) { // GPS ativo nos últimos 5 min
+          lastActivity = Date.now();
+        }
+
+        // Se o GPS service tem turno ativo, NÃO expirar nunca
+        if (gpsService.isTracking()) {
+          return; // Turno ativo — sessão protegida
+        }
+
         const now = new Date();
         const currentDay = now.getDate();
 
@@ -2265,7 +2308,7 @@ export default function App() {
           const IS_INACTIVE_LIMIT = 60 * 60 * 1000; // Inativo por mais de 1h antes da meia-noite
 
           if (inactiveMs >= IS_INACTIVE_LIMIT) {
-            console.log('[Sessão Auditor] Virada do dia (00:00) - Auditor inativo. Encerrando sessão.');
+            console.log('[Sessão Auditor] Virada do dia (00:00) - Auditor inativo e sem turno. Encerrando sessão.');
             expireSession('na virada do dia (00:00) por inatividade');
           } else {
             console.log('[Sessão Auditor] Virada do dia (00:00) - Auditor ativo! Sessão renovada automaticamente.');
@@ -2988,7 +3031,7 @@ export default function App() {
         {(activeTab === 'inicio' || activeTab === 'home' || activeTab === 'boas_vindas') && <InicioView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} setActiveTab={setActiveTab} setChamadoEmEdicao={setChamadoEmEdicao} theme={theme} isWelcomeModalOpen={isWelcomeModalOpen} userPermissions={userPermissions} />}
         {activeTab === 'calendario' && <CalendarioOperacionalView currentUser={currentUser} activeRegional={activeRegional} />}
         {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
-        {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} />}
+        {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} />}
         {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} />}
         {activeTab === 'frota' && <FrotaView vehicles={vehicles} laudosGeral={laudosGeral} onSelectVehicle={(v) => { setSelectedVehicle(v); setActiveTab('detalhes_veiculo'); }} userPermissions={userPermissions} />}
         {activeTab === 'ociosidade_frota' && <OciosidadeView vehicles={vehicles} chamados={chamados} hoje={hoje} />}
@@ -3298,7 +3341,7 @@ export default function App() {
 
           {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
 
-          {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} />}
+          {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} />}
 
           {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} />}
 
@@ -7476,7 +7519,7 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
 
 
 
-function ChamadosView({ chamados, vehicles, hoje, onEditar, onLiberar, userPermissions }) {
+function ChamadosView({ chamados, vehicles, hoje, onEditar, onLiberar, userPermissions, podeFinalizar }) {
   const vehiclesMap = useMemo(() => new Map((vehicles || []).map(v => [v.placa, v])), [vehicles]);
 
   const [filters, setFilters] = useState({ turno: '', tipoOp: '', subTipo: '', etapa: '', subFluxo: '' });
@@ -7908,7 +7951,7 @@ function ChamadosView({ chamados, vehicles, hoje, onEditar, onLiberar, userPermi
 
                 
 
-                {c.etapaWorkflow?.includes('Liberado Opera') ? (
+                {podeFinalizar && c.etapaWorkflow?.includes('Liberado Opera') ? (
                   isAttention ? (
                     <button 
                       onClick={() => onLiberar(c)}
