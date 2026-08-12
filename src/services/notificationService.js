@@ -2,14 +2,23 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
+/**
+ * NotificationService v2.0
+ * 
+ * Serviço de notificações para auditores de campo.
+ * Suporta: Som nativo, vibração forte, banner na barra de status.
+ * 
+ * Eventos notificados:
+ * - Nova OS atribuída ao auditor
+ * - OS removida/reatribuída do auditor
+ */
 class NotificationService {
   constructor() {
     this.initialized = false;
-    this.audioAlert = null;
   }
 
   /**
-   * Inicializa o canal de notificação nativo no Android com som de alerta e vibração
+   * Inicializa os canais de notificação nativos no Android
    */
   async init() {
     if (this.initialized) return;
@@ -20,7 +29,7 @@ class NotificationService {
         const perm = await LocalNotifications.requestPermissions();
         console.log('[NotificationService] Permissão nativa de notificação:', perm);
 
-        // Cria o canal de alta prioridade para novas ordens de serviço
+        // Canal 1: Novas ordens de serviço (prioridade máxima)
         await LocalNotifications.createChannel({
           id: 'novas_ordens_servico',
           name: 'Novas Ordens de Serviço',
@@ -28,12 +37,25 @@ class NotificationService {
           importance: 5, // MAX importance / Heads-up banner
           visibility: 1, // Public on lockscreen
           vibration: true,
-          sound: 'res_custom_notification.mp3', // Som nativo do sistema fallback
+          sound: 'default', // Som padrão do sistema (funciona em background)
           lights: true,
           lightColor: '#2563EB',
         });
+
+        // Canal 2: OS removidas (prioridade alta)
+        await LocalNotifications.createChannel({
+          id: 'os_removidas',
+          name: 'OS Removidas ou Reatribuídas',
+          description: 'Notificações quando uma OS é retirada do auditor',
+          importance: 4, // HIGH
+          visibility: 1,
+          vibration: true,
+          sound: 'default',
+          lights: true,
+          lightColor: '#DC2626',
+        });
       } catch (err) {
-        console.warn('[NotificationService] Erro ao inicializar canal nativo:', err);
+        console.warn('[NotificationService] Erro ao inicializar canais nativos:', err);
       }
     }
 
@@ -41,7 +63,7 @@ class NotificationService {
   }
 
   /**
-   * Toca um alerta sonoro via Web Audio sintetizado (funciona em PWA e APK)
+   * Toca um alerta sonoro via Web Audio sintetizado (funciona em foreground PWA e APK)
    */
   playBeep() {
     try {
@@ -78,9 +100,21 @@ class NotificationService {
   }
 
   /**
-   * Dispara vibração nativa ou Web Vibrate
+   * Dispara vibração forte nativa + Web Vibrate fallback
    */
-  async triggerVibration() {
+  async triggerVibration(pattern = 'strong') {
+    // 1. Vibração nativa do sistema via navigator.vibrate (funciona no Android WebView)
+    if (navigator.vibrate) {
+      if (pattern === 'urgent') {
+        // Padrão urgente: vibra-pausa-vibra-pausa-vibra longa
+        navigator.vibrate([400, 200, 400, 200, 800]);
+      } else {
+        // Padrão forte normal
+        navigator.vibrate([300, 150, 500]);
+      }
+    }
+
+    // 2. Haptics nativo do Capacitor (complementar)
     if (Capacitor.isNativePlatform()) {
       try {
         await Haptics.impact({ style: ImpactStyle.Heavy });
@@ -88,12 +122,15 @@ class NotificationService {
           try {
             await Haptics.impact({ style: ImpactStyle.Heavy });
           } catch (e) {}
-        }, 200);
+        }, 250);
+        setTimeout(async () => {
+          try {
+            await Haptics.impact({ style: ImpactStyle.Heavy });
+          } catch (e) {}
+        }, 500);
       } catch (e) {
         console.warn('[NotificationService] Erro no Haptics:', e);
       }
-    } else if (navigator.vibrate) {
-      navigator.vibrate([200, 100, 300, 100, 400]);
     }
   }
 
@@ -103,11 +140,11 @@ class NotificationService {
   async notifyNewTask({ id, title, description, osNumber, auditor }) {
     await this.init();
 
-    // 1. Som de alerta
+    // 1. Som de alerta (funciona em foreground)
     this.playBeep();
 
     // 2. Vibração forte
-    await this.triggerVibration();
+    await this.triggerVibration('urgent');
 
     // 3. Notificação nativa no banner e barra de status do Android
     if (Capacitor.isNativePlatform()) {
@@ -120,6 +157,7 @@ class NotificationService {
               title: `🚨 NOVA OS ATRIBUÍDA: #${osNumber || id || 'NOVA'}`,
               body: description || title || 'Uma nova ordem de serviço foi atribuída a você no WFM.',
               channelId: 'novas_ordens_servico',
+              sound: 'default', // Som nativo do sistema (funciona em background)
               ongoing: false,
               autoCancel: true,
               extra: { taskId: id, osNumber },
@@ -127,7 +165,43 @@ class NotificationService {
           ],
         });
       } catch (err) {
-        console.warn('[NotificationService] Erro ao agendar LocalNotification:', err);
+        console.warn('[NotificationService] Erro ao agendar LocalNotification (nova OS):', err);
+      }
+    }
+  }
+
+  /**
+   * Notifica a remoção/reatribuição de uma Ordem de Serviço
+   */
+  async notifyTaskRemoved({ id, osNumber, reason }) {
+    await this.init();
+
+    // 1. Som de alerta
+    this.playBeep();
+
+    // 2. Vibração padrão
+    await this.triggerVibration('strong');
+
+    // 3. Notificação nativa
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const notifId = Math.floor(Math.random() * 1000000);
+        await LocalNotifications.schedule({
+          notifications: [
+            {
+              id: notifId,
+              title: `⚠️ OS REMOVIDA: #${osNumber || id || ''}`,
+              body: reason || 'Uma ordem de serviço foi retirada da sua agenda. Verifique suas tarefas atuais.',
+              channelId: 'os_removidas',
+              sound: 'default',
+              ongoing: false,
+              autoCancel: true,
+              extra: { taskId: id, osNumber, action: 'removed' },
+            },
+          ],
+        });
+      } catch (err) {
+        console.warn('[NotificationService] Erro ao agendar LocalNotification (OS removida):', err);
       }
     }
   }

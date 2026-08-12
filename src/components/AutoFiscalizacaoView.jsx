@@ -438,28 +438,32 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
   
   // ── Strict GPS Permission Block (com re-verificação ao retornar das configurações)
   const [gpsBlocked, setGpsBlocked] = useState(false);
+  const [permStatus, setPermStatus] = useState({ location: false, backgroundLocation: false, batteryOptimized: 'unknown', notifications: false, allGranted: false });
 
   useEffect(() => {
     let active = true;
-    let cleanupResume = null;
+    let removeListener = null;
 
-    const verifyGps = async () => {
+    const verifyPermissions = async () => {
       if (isMobileAuditor && gpsService.isNative()) {
-        const hasPerm = await gpsService.checkStrictPermission();
-        if (active) setGpsBlocked(!hasPerm);
+        const status = await permissionService.checkAll();
+        if (active) {
+          setPermStatus(status);
+          setGpsBlocked(!status.location);
+        }
       }
     };
 
-    verifyGps();
+    verifyPermissions();
 
     // Re-verificar permissões quando o app retorna ao foreground (após usuário conceder nas configurações)
     if (isMobileAuditor && gpsService.isNative()) {
-      cleanupResume = permissionService.onResume(async () => {
-        console.log('[AutoFiscalização] App retornou ao foreground — re-verificando permissões GPS...');
-        const hasPerm = await gpsService.checkStrictPermission();
+      removeListener = permissionService.addListener((status) => {
+        console.log('[AutoFiscalização] App retornou ao foreground — re-verificando permissões...', status);
         if (active) {
-          setGpsBlocked(!hasPerm);
-          if (hasPerm) {
+          setPermStatus(status);
+          setGpsBlocked(!status.location);
+          if (status.location) {
             console.log('[AutoFiscalização] ✅ Permissão GPS concedida — desbloqueando tela');
           }
         }
@@ -1704,15 +1708,78 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
 
     if (gpsBlocked) {
       return (
-        <div className="w-full h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
-          <AlertTriangle size={64} className="text-red-500 mb-6 animate-pulse" />
-          <h2 className="text-white text-2xl font-black mb-4 uppercase tracking-widest">Acesso Bloqueado</h2>
-          <p className="text-slate-300 text-sm leading-relaxed mb-8 max-w-sm">
-            O aplicativo exige que a permissão de localização esteja configurada como <strong className="text-white">"Permitir o tempo todo"</strong> para que possamos monitorar seu trajeto e manter a sua segurança em campo, mesmo quando a tela estiver apagada.
+        <div className="w-full h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300 overflow-y-auto">
+          <AlertTriangle size={64} className="text-red-500 mb-4 animate-pulse" />
+          <h2 className="text-white text-2xl font-black mb-2 uppercase tracking-widest">Acesso Bloqueado</h2>
+          <p className="text-slate-300 text-sm leading-relaxed mb-6 max-w-sm">
+            Para garantir a segurança em campo e o monitoramento em tempo real, o aplicativo exige as seguintes permissões:
           </p>
+          
+          <div className="w-full max-w-xs space-y-4 mb-8 text-left">
+            {/* Permissão de Localização */}
+            <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-2 shadow-lg border border-slate-700">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <MapPin size={18} className={permStatus.location ? "text-emerald-400" : "text-red-400"} />
+                  <span className="text-slate-100 font-semibold text-sm">Localização Contínua</span>
+                </div>
+                {permStatus.location ? <CheckCircle2 size={18} className="text-emerald-400" /> : <XCircle size={18} className="text-red-400" />}
+              </div>
+              {!permStatus.location && (
+                <button
+                  onClick={() => gpsService.openSettings()}
+                  className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 rounded-lg transition-colors uppercase"
+                >
+                  Permitir o tempo todo
+                </button>
+              )}
+            </div>
+
+            {/* Otimização de Bateria */}
+            <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-2 shadow-lg border border-slate-700">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Zap size={18} className="text-warning" />
+                  <span className="text-slate-100 font-semibold text-sm">Otimização de Bateria</span>
+                </div>
+                <AlertCircle size={18} className="text-warning" />
+              </div>
+              <p className="text-slate-400 text-xs">Deve estar como "Sem restrições" para não interromper o GPS.</p>
+              <button
+                onClick={() => permissionService.openBatterySettings()}
+                className="mt-1 w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2 rounded-lg transition-colors uppercase"
+              >
+                Verificar Bateria
+              </button>
+            </div>
+
+            {/* Notificações */}
+            <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-2 shadow-lg border border-slate-700">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={18} className={permStatus.notifications ? "text-emerald-400" : "text-red-400"} />
+                  <span className="text-slate-100 font-semibold text-sm">Notificações</span>
+                </div>
+                {permStatus.notifications ? <CheckCircle2 size={18} className="text-emerald-400" /> : <XCircle size={18} className="text-red-400" />}
+              </div>
+              {!permStatus.notifications && (
+                <button
+                  onClick={() => permissionService.requestNotifications()}
+                  className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 rounded-lg transition-colors uppercase"
+                >
+                  Permitir Alertas
+                </button>
+              )}
+            </div>
+          </div>
+
           <button
-            onClick={() => gpsService.openSettings()}
-            className="w-full max-w-xs bg-red-600 hover:bg-red-700 text-white font-black py-4 rounded-2xl shadow-lg transition-all text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95"
+            onClick={async () => {
+              const status = await permissionService.checkAll();
+              setPermStatus(status);
+              setGpsBlocked(!status.location);
+            }}
+            className="w-full max-w-xs bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl shadow-lg transition-all text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95"
           >
             <Zap size={18} /> ABRIR CONFIGURAÇÕES
           </button>
@@ -6732,6 +6799,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
 
       esc = escToday;
 
+
       // 2. Buscar o turno (shift) do dia de hoje
 
       const { data: sToday } = await supabase.from('autofiscalizacao_shifts').select('*').eq('auditor', auditorName).eq('date', todayStr).maybeSingle();
@@ -6844,6 +6912,43 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
               osNumber: payload.new?.os_numero,
               auditor: auditorLogin,
             });
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'wfm_tarefas' },
+          (payload) => {
+            if (payload.old?.auditor === auditorLogin && payload.new?.auditor !== auditorLogin) {
+              console.log('[Realtime OS] Tarefa removida deste auditor:', payload);
+              notificationService.notifyTaskRemoved({
+                id: payload.old?.id,
+                osNumber: payload.old?.os_numero || payload.new?.os_numero,
+                reason: 'A Ordem de Servico foi reatribuida ou removida da sua pauta.'
+              });
+            } else if (payload.old?.auditor !== auditorLogin && payload.new?.auditor === auditorLogin) {
+              console.log('[Realtime OS] Tarefa reatribuida para este auditor:', payload);
+              notificationService.notifyNewTask({
+                id: payload.new?.id,
+                title: payload.new?.titulo || 'Nova Ordem de Servico (Reatribuida)',
+                description: payload.new?.descricao || `OS reatribuida: ${payload.new?.os_numero || ''}`,
+                osNumber: payload.new?.os_numero,
+                auditor: auditorLogin,
+              });
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'wfm_tarefas' },
+          (payload) => {
+            if (payload.old?.auditor === auditorLogin) {
+              console.log('[Realtime OS] Tarefa deletada:', payload);
+              notificationService.notifyTaskRemoved({
+                id: payload.old?.id,
+                osNumber: payload.old?.os_numero,
+                reason: 'A Ordem de Servico foi cancelada ou excluida.'
+              });
+            }
           }
         )
         .subscribe();

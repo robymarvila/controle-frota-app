@@ -1,0 +1,49 @@
+diff --git a/node_modules/@capacitor-community/background-geolocation/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capacitor-community/background-geolocation/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocationService.java
+index fafbb86..cd46e49 100644
+--- a/node_modules/@capacitor-community/background-geolocation/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocationService.java
++++ b/node_modules/@capacitor-community/background-geolocation/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocationService.java
+@@ -53,11 +53,20 @@ public class BackgroundGeolocationService extends Service {
+     // service is terminated immediately.
+     @Override
+     public boolean onUnbind(Intent intent) {
++        // Preservar watchers que possuem backgroundNotification (foreground service GPS).
++        // Só remove watchers sem notificação background (foreground-only watchers).
++        HashSet<Watcher> toRemove = new HashSet<Watcher>();
+         for (Watcher watcher : watchers) {
+-            watcher.client.removeLocationUpdates(watcher.locationCallback);
++            if (watcher.backgroundNotification == null) {
++                watcher.client.removeLocationUpdates(watcher.locationCallback);
++                toRemove.add(watcher);
++            }
++        }
++        watchers.removeAll(toRemove);
++        // Só encerra o service se nenhum watcher background sobrou
++        if (getNotification() == null) {
++            stopSelf();
+         }
+-        watchers = new HashSet<Watcher>();
+-        stopSelf();
+         return false;
+     }
+ 
+@@ -132,10 +141,16 @@ public class BackgroundGeolocationService extends Service {
+             // each time a background watcher is added.
+             if (backgroundNotification != null) {
+                 try {
+-                    // This method has been known to fail due to weird
+-                    // permission bugs, so we prevent any exceptions from
+-                    // crashing the app. See issue #86.
+-                    startForeground(NOTIFICATION_ID, backgroundNotification);
++                    // Android 14 (API 34+) exige foregroundServiceType no startForeground
++                    if (Build.VERSION.SDK_INT >= 34) {
++                        startForeground(
++                            NOTIFICATION_ID,
++                            backgroundNotification,
++                            ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
++                        );
++                    } else {
++                        startForeground(NOTIFICATION_ID, backgroundNotification);
++                    }
+                 } catch (Exception exception) {
+                     Logger.error("Failed to foreground service", exception);
+                 }

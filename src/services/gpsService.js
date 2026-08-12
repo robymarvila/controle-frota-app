@@ -111,6 +111,20 @@ class GpsService {
   }
 
   /**
+   * Solicita exclusão de otimização de bateria (Doze Mode)
+   */
+  async requestBatteryExclusion() {
+    if (!this.isNative()) return;
+    try {
+      // O plugin BackgroundGeolocation já expõe openSettings() que leva 
+      // o usuário para a tela onde ele pode desativar a otimização de bateria.
+      await BackgroundGeolocation.openSettings();
+    } catch (e) {
+      console.warn('[GPS Service] Erro ao solicitar exclusão de bateria:', e);
+    }
+  }
+
+  /**
    * Verifica estritamente se a localização está concedida.
    * Para verificação detalhada (foreground vs background), usar permissionService.
    */

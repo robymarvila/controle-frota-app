@@ -1,19 +1,18 @@
 import { Capacitor } from '@capacitor/core';
-import { App } from '@capacitor/app';
 
 /**
- * PermissionService — Gerenciamento centralizado de permissões nativas Android
+ * PermissionService v2.0
  * 
- * Verifica e solicita:
- * - Localização Foreground (ACCESS_FINE_LOCATION)
- * - Localização Background (ACCESS_BACKGROUND_LOCATION) → "Permitir o tempo todo"
- * - Exclusão de Otimização de Bateria (Doze Mode)
- * - Notificações (POST_NOTIFICATIONS, Android 13+)
+ * Serviço centralizado de verificação e solicitação de permissões Android.
+ * Verifica: Localização (foreground + background), Otimização de Bateria (Doze), Notificações.
+ * 
+ * Integrado com a tela de onboarding do AutoFiscalizacaoView para
+ * guiar o auditor pelas permissões necessárias.
  */
 class PermissionService {
   constructor() {
+    this._cachedStatus = null;
     this._listeners = [];
-    this._resumeListenerActive = false;
   }
 
   isNative() {
@@ -21,96 +20,92 @@ class PermissionService {
   }
 
   /**
-   * Verifica todas as permissões necessárias de uma vez.
-   * Retorna um objeto com o estado de cada permissão.
+   * Verifica TODAS as permissões críticas e retorna um objeto de status.
+   * Retorna: { location, backgroundLocation, batteryOptimized, notifications, allGranted }
    */
-  async checkAllPermissions() {
+  async checkAll() {
     if (!this.isNative()) {
+      // No modo web, simular tudo como concedido
       return {
-        locationForeground: true,
-        locationBackground: true,
-        batteryOptimized: false, // false = não otimizado = bom
+        location: true,
+        backgroundLocation: true,
+        batteryOptimized: false, // false = SEM otimização = bom
         notifications: true,
         allGranted: true,
       };
     }
 
-    const [locationFg, locationBg, notifs] = await Promise.all([
-      this.checkForegroundLocation(),
-      this.checkBackgroundLocation(),
-      this.checkNotifications(),
-    ]);
-
-    return {
-      locationForeground: locationFg,
-      locationBackground: locationBg,
-      batteryOptimized: false, // Heurística otimista — plugin gerencia via foreground service
-      notifications: notifs,
-      allGranted: locationFg && locationBg && notifs,
+    const status = {
+      location: false,
+      backgroundLocation: false,
+      batteryOptimized: true, // true = COM otimização = ruim para background
+      notifications: false,
+      allGranted: false,
     };
-  }
 
-  /**
-   * Verifica se a localização foreground está concedida.
-   */
-  async checkForegroundLocation() {
-    if (!this.isNative()) return true;
     try {
+      // 1. Verificar permissão de localização foreground
       const { Geolocation } = await import('@capacitor/geolocation');
-      const perm = await Geolocation.checkPermissions();
-      return perm.location === 'granted';
+      const locPerm = await Geolocation.checkPermissions();
+      status.location = locPerm.location === 'granted' || locPerm.coarseLocation === 'granted';
+      
+      // Background location — Android separa foreground de background
+      // Se coarseLocation ou location está granted, verificamos se background também
+      // No Android, 'granted' para background é retornado separadamente
+      // O plugin @capacitor/geolocation não diferencia bem — usamos o plugin BackgroundGeolocation
+      try {
+        const { registerPlugin } = await import('@capacitor/core');
+        const BGGeo = registerPlugin('BackgroundGeolocation');
+        // Se conseguimos chamar addWatcher com requestPermissions:false sem erro,
+        // a permissão background está concedida. Mas não queremos iniciar um watcher.
+        // Heurística: se location está granted e o plugin não rejeita, consideramos background OK
+        status.backgroundLocation = status.location; // Simplificação — o plugin solicita em runtime
+      } catch (e) {
+        status.backgroundLocation = status.location;
+      }
     } catch (e) {
-      console.warn('[PermissionService] Erro ao checar localização foreground:', e);
-      return false;
+      console.warn('[PermissionService] Erro ao verificar localização:', e);
     }
-  }
 
-  /**
-   * Verifica se a localização em background ("O tempo todo") está concedida.
-   * 
-   * O plugin @capacitor/geolocation reporta location='granted' tanto para
-   * "Apenas enquanto usa" quanto para "Permitir o tempo todo".
-   * Usamos a verificação dupla de location + coarseLocation como heurística.
-   */
-  async checkBackgroundLocation() {
-    if (!this.isNative()) return true;
     try {
-      const { Geolocation } = await import('@capacitor/geolocation');
-      const perm = await Geolocation.checkPermissions();
-      if (perm.location !== 'granted') return false;
-      // Verificação extra: coarseLocation granted indica maior confiança
-      if (perm.coarseLocation && perm.coarseLocation !== 'granted') return false;
-      return true;
+      // 2. Verificar otimização de bateria (Doze mode)
+      // Android: PowerManager.isIgnoringBatteryOptimizations()
+      // Capacitor não expõe isso diretamente — usamos um workaround via plugin
+      // Se REQUEST_IGNORE_BATTERY_OPTIMIZATIONS está no manifest, podemos solicitar
+      // Mas verificar requer código nativo. Usamos heurística:
+      // Se o plugin BGGeo funciona em background, Doze pode não ser problema.
+      // Para detecção real, precisaríamos de um plugin Capacitor customizado.
+      // Por ora, marcamos como 'desconhecido' e orientamos o usuário a verificar manualmente
+      status.batteryOptimized = 'unknown'; // Orientar usuário a desativar manualmente
     } catch (e) {
-      console.warn('[PermissionService] Erro ao checar localização background:', e);
-      return false;
+      console.warn('[PermissionService] Erro ao verificar bateria:', e);
     }
-  }
 
-  /**
-   * Verifica se as notificações estão permitidas (Android 13+).
-   */
-  async checkNotifications() {
-    if (!this.isNative()) return true;
     try {
+      // 3. Verificar permissão de notificações (Android 13+)
       const { LocalNotifications } = await import('@capacitor/local-notifications');
-      const perm = await LocalNotifications.checkPermissions();
-      return perm.display === 'granted';
+      const notifPerm = await LocalNotifications.checkPermissions();
+      status.notifications = notifPerm.display === 'granted';
     } catch (e) {
-      console.warn('[PermissionService] Erro ao checar notificações:', e);
-      return true; // Assume permitido se falhar
+      console.warn('[PermissionService] Erro ao verificar notificações:', e);
     }
+
+    // allGranted = tudo OK
+    status.allGranted = status.location && status.notifications;
+
+    this._cachedStatus = status;
+    return status;
   }
 
   /**
-   * Solicita permissão de localização foreground.
+   * Solicita permissão de localização foreground
    */
-  async requestForegroundLocation() {
+  async requestLocation() {
     if (!this.isNative()) return true;
     try {
       const { Geolocation } = await import('@capacitor/geolocation');
-      const perm = await Geolocation.requestPermissions();
-      return perm.location === 'granted';
+      const result = await Geolocation.requestPermissions({ permissions: ['location', 'coarseLocation'] });
+      return result.location === 'granted' || result.coarseLocation === 'granted';
     } catch (e) {
       console.warn('[PermissionService] Erro ao solicitar localização:', e);
       return false;
@@ -118,71 +113,79 @@ class PermissionService {
   }
 
   /**
-   * Solicita permissão de notificações (Android 13+).
+   * Solicita permissão de notificações (Android 13+)
    */
   async requestNotifications() {
     if (!this.isNative()) return true;
     try {
       const { LocalNotifications } = await import('@capacitor/local-notifications');
-      const perm = await LocalNotifications.requestPermissions();
-      return perm.display === 'granted';
+      const result = await LocalNotifications.requestPermissions();
+      return result.display === 'granted';
     } catch (e) {
       console.warn('[PermissionService] Erro ao solicitar notificações:', e);
-      return true;
+      return false;
     }
   }
 
   /**
-   * Abre as configurações do app no Android para que o usuário possa:
-   * - Alterar permissão de localização para "Permitir o tempo todo"
-   * - Alterar otimização de bateria para "Sem restrições"
+   * Abre as configurações do app no Android (para o usuário conceder permissões manualmente)
    */
   async openAppSettings() {
     if (!this.isNative()) return;
     try {
       const { registerPlugin } = await import('@capacitor/core');
-      const BackgroundGeolocation = registerPlugin('BackgroundGeolocation');
-      await BackgroundGeolocation.openSettings();
+      const BGGeo = registerPlugin('BackgroundGeolocation');
+      await BGGeo.openSettings();
     } catch (e) {
       console.warn('[PermissionService] Erro ao abrir configurações:', e);
     }
   }
 
   /**
-   * Registra um callback que é chamado toda vez que o app retorna ao foreground.
-   * Usado para re-verificar permissões após o usuário voltar das configurações.
-   * Retorna função de cleanup para remover o listener.
+   * Abre as configurações de bateria do app no Android.
+   * Em Android 6+, envia intent ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+   * via abertura das configurações do app (já que Capacitor não expõe isso diretamente).
    */
-  onResume(callback) {
-    if (!this.isNative()) return () => {};
+  async openBatterySettings() {
+    if (!this.isNative()) return;
+    try {
+      // Usa o mesmo openSettings do plugin que abre a tela de detalhes do app
+      // onde o usuário pode ver e alterar a otimização de bateria
+      const { registerPlugin } = await import('@capacitor/core');
+      const BGGeo = registerPlugin('BackgroundGeolocation');
+      await BGGeo.openSettings();
+    } catch (e) {
+      console.warn('[PermissionService] Erro ao abrir configurações de bateria:', e);
+    }
+  }
 
-    const listener = App.addListener('appStateChange', async (state) => {
-      if (state.isActive) {
-        try {
-          await callback();
-        } catch (e) {
-          console.warn('[PermissionService] Erro no callback de resume:', e);
-        }
-      }
+  /**
+   * Chamado quando o app retorna ao foreground (resume).
+   * Re-verifica permissões e notifica listeners.
+   */
+  async onResume() {
+    const status = await this.checkAll();
+    this._listeners.forEach(fn => {
+      try { fn(status); } catch (e) {}
     });
+    return status;
+  }
 
-    this._listeners.push(listener);
-
+  /**
+   * Registra um listener para mudanças de permissão
+   */
+  addListener(fn) {
+    this._listeners.push(fn);
     return () => {
-      if (listener && listener.remove) {
-        listener.remove();
-      }
+      this._listeners = this._listeners.filter(l => l !== fn);
     };
   }
 
   /**
-   * Remove todos os listeners registrados.
+   * Retorna o último status verificado sem fazer nova consulta
    */
-  cleanup() {
-    this._listeners.forEach(l => {
-      if (l && l.remove) l.remove();
-    });
-    this._listeners = [];
+  getCachedStatus() {
+    return this._cachedStatus;
   }
 }
 
