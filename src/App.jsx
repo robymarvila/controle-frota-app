@@ -3750,7 +3750,8 @@ function MatrizAcessosView({ currentUser, onUpdateConfigAcessos, showFeedback })
     { id: 'pode_concluir_chamado_oficina', label: 'Concluir Manutenção Oficina (Interna / Externa)' },
     { id: 'pode_movimentar_oficinas', label: 'Movimentar Veículos entre Oficinas (Interna ⇄ Externa)' },
     { id: 'pode_configurar_buckets', label: 'WFM: Configurar / Gerenciar Buckets (Hierarquia, Inativação e Exclusão)' },
-    { id: 'pode_editar_os_wfm', label: 'WFM: Editar OS / Atividades' }
+    { id: 'pode_editar_os_wfm', label: 'WFM: Editar OS / Atividades' },
+    { id: 'pode_alterar_situacao_veiculo', label: 'Alterar Situação do Veículo (PARADO ⇄ RODANDO)' }
   ];
 
   const PERMISSOES_EXTRA_FORCA = [
@@ -10987,6 +10988,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   }, [listaOficinas]);
 
   const podeAlterarEtapaManual = userPermissions?.permissoes_edicao?.pode_alterar_etapa_manual === true || (currentUser?.perfil || '').toUpperCase() === 'ADMINISTRADOR' || currentUser?.isAdmin === true;
+  const podeAlterarSituacaoVeiculo = userPermissions?.permissoes_edicao?.pode_alterar_situacao_veiculo === true || (currentUser?.perfil || '').toUpperCase() === 'ADMINISTRADOR' || currentUser?.isAdmin === true;
 
   // Buscador de 100% dos detalhes sob demanda (fotos, historico, comentarios, workflows) ao abrir o chamado
   useEffect(() => {
@@ -11949,7 +11951,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                 Situação Veículo <span className="text-rose-500">*</span>
               </label>
               <select 
-                disabled={isFrota && isEditing} 
+                disabled={isEditing && !podeAlterarSituacaoVeiculo} 
                 value={formData.situacaoVeiculo} 
                 onChange={e => setFormData({...formData, situacaoVeiculo: e.target.value})} 
                 className="w-full min-h-[48px] p-3.5 bg-slate-50 rounded-2xl font-bold text-slate-800 outline-none border border-slate-200 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed text-sm shadow-xs"
