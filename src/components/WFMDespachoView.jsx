@@ -270,102 +270,103 @@ export default function WFMDespachoView({ currentUser, activeRegional }) {
 
 
 
-  const fetchFieldAudits = async () => {
-
+    const fetchFieldAudits = async () => {
     try {
-
       const { data: wfmTasks } = await supabase.from('wfm_tarefas').select('*');
-
       const { data: wfs } = await supabase.from('autofiscalizacao_workflows').select('*').eq('field_audit_required', true).eq('is_finished', false);
-
       const { data: allOrdens } = await supabase.from('autofiscalizacao_ordens').select('*');
-
       
-
       const tasksToInsert = [];
-
       if (wfs && wfs.length > 0 && wfmTasks) {
-
         const missingWfs = wfs.filter(wf => !wfmTasks.some(t => t.id_origem === wf.inspid));
-
         
-
         for (const wf of missingWfs) {
-
-          const os = allOrdens?.find(o => o.nr_ordem === wf.osid) || {};
-
+          let os = allOrdens?.find(o => o.nr_ordem === wf.osid);
+          if (!os) {
+            const { data } = await supabase.from('autofiscalizacao_ordens').select('*').eq('nr_ordem', wf.osid).maybeSingle();
+            os = data || {};
+          }
+          
           tasksToInsert.push({
-
             modulo_origem: 'AUTOFISCALIZACAO',
-
             id_origem: wf.inspid,
-
             categoria: 'AutoFiscalização - Campo',
-
             payload_dados: {
-
+              ...os,
               osid: wf.osid,
-
               titulo: `OS ${wf.osid} - Fiscalização de Campo`,
-
               endereco: os.endereco_completo || os.endereco_cliente || 'Endereço Não Informado',
-
               latitude: os.latitude || os.lat_os || null,
-
               longitude: os.longitude || os.lng_os || null,
-
-              base: os.base_contrato || 'Base Não Informada',
-
+              base: os.base_contrato || os.base || 'Base Não Informada',
               regional: wf.regional || ''
-
             },
-
             status: 'pendente',
-
             auditor: '',
-
             historico: [{ timestamp: new Date().toISOString(), usuario: 'Sistema', acao: 'WFM_RECEBIDO', observacao: 'Tarefa importada automaticamente do Workflow' }]
-
           });
-
         }
-
       }
-
       
-
       if (tasksToInsert.length > 0) {
-
         await supabase.from('wfm_tarefas').insert(tasksToInsert);
-
         const { data: reFetched } = await supabase.from('wfm_tarefas').select('*');
-
         if (reFetched) {
-
           setFieldAudits(reFetched.map(transformTask));
-
           return;
-
         }
-
       }
-
       
-
       if (wfmTasks) {
+        let updatedAny = false;
+        const tasksToUpdate = wfmTasks.filter(t => t.payload_dados && t.payload_dados.base === 'Base Não Informada' && t.payload_dados.osid);
+        for (const t of tasksToUpdate) {
+          let os = allOrdens?.find(o => o.nr_ordem === t.payload_dados.osid);
+          if (!os) {
+            const { data } = await supabase.from('autofiscalizacao_ordens').select('*').eq('nr_ordem', t.payload_dados.osid).maybeSingle();
+            os = data;
+          }
+          
+          if (os && (os.base_contrato || os.base) && (os.base_contrato !== 'Base Não Informada' && os.base !== 'Base Não Informada')) {
+            const newPayload = {
+              ...t.payload_dados,
+              ...os,
+              base: os.base_contrato || os.base || t.payload_dados.base,
+              endereco: os.endereco_completo || os.endereco_cliente || t.payload_dados.endereco,
+              latitude: os.latitude || os.lat_os || null,
+              longitude: os.longitude || os.lng_os || null
+            };
+            const newHist = [
+              ...(t.historico || []),
+              {
+                timestamp: new Date().toISOString(),
+                usuario: 'Sistema',
+                acao: 'SINC_DADOS_ATRASADOS_FULL',
+                observacao: 'Dados completos da OS (incluindo linha do tempo) sincronizados tardiamente.'
+              }
+            ];
+            await supabase.from('wfm_tarefas').update({
+              payload_dados: newPayload,
+              historico: newHist
+            }).eq('id', t.id);
+            updatedAny = true;
+          }
+        }
+        
+        if (updatedAny) {
+          const { data: reFetchedAgain } = await supabase.from('wfm_tarefas').select('*');
+          if (reFetchedAgain) {
+            setFieldAudits(reFetchedAgain.map(transformTask));
+            return;
+          }
+        }
 
         setFieldAudits(wfmTasks.map(transformTask));
-
       }
-
     } catch (err) {
-
       console.error("Error in fetchFieldAudits:", err);
-
     }
-
   };
-
   const fetchAtividadesExtras = async () => { 
 
     const { data } = await supabase.from('autofiscalizacao_atividades_extras').select('*'); 
@@ -404,7 +405,7 @@ export default function WFMDespachoView({ currentUser, activeRegional }) {
 
   };
 
-  const fetchColaboradores = async () => { const { data } = await supabase.from('colaboradores').select('*'); if (data) setColaboradoresList(data); };
+  const fetchColaboradores = async () => { const { data } = await supabase.from('usuarios').select('*'); if (data) setColaboradoresList(data); };
 
   
 
@@ -750,7 +751,7 @@ export default function WFMDespachoView({ currentUser, activeRegional }) {
           auditors={(colaboradoresList || []).filter(c => {
             const p = String(c.cargo || c.perfil || '').toLowerCase();
             return p.includes('auditor') || p.includes('inspetor');
-          }).filter(c => !escalas || escalas.length === 0 || escalas.some(e => e.auditor === c.login || e.auditor === c.email || e.auditor === c.nome))}
+          })}
           onEditOS={(osToEdit) => {
             setViewingOSDetails(null);
             setEditingTask(osToEdit);

@@ -3047,6 +3047,7 @@ export default function App() {
         {activeTab === 'wfm_despacho' && <WFMDespachoView currentUser={currentUser} activeRegional={activeRegional} />}
         {activeTab === 'detalhes_veiculo' && selectedVehicle && (
           <DetalhesVeiculoView 
+            userPermissions={userPermissions}
             veiculo={vehicles.find(v => v.id === selectedVehicle.id)} laudosGeral={laudosGeral} setLaudosGeral={setLaudosGeral}
             chamados={chamados} rawChamados={rawChamados} colaboradores={colaboradores} hoje={hoje} currentUser={currentUser}
             onVoltar={() => { setSelectedVehicle(null); setActiveTab('frota'); }}
@@ -3376,6 +3377,7 @@ export default function App() {
           {activeTab === 'detalhes_veiculo' && selectedVehicle && (
 
             <DetalhesVeiculoView 
+              userPermissions={userPermissions}
 
               veiculo={vehicles.find(v => v.id === selectedVehicle.id)} laudosGeral={laudosGeral} setLaudosGeral={setLaudosGeral}
 
@@ -3751,7 +3753,8 @@ function MatrizAcessosView({ currentUser, onUpdateConfigAcessos, showFeedback })
     { id: 'pode_movimentar_oficinas', label: 'Movimentar Veículos entre Oficinas (Interna ⇄ Externa)' },
     { id: 'pode_configurar_buckets', label: 'WFM: Configurar / Gerenciar Buckets (Hierarquia, Inativação e Exclusão)' },
     { id: 'pode_editar_os_wfm', label: 'WFM: Editar OS / Atividades' },
-    { id: 'pode_alterar_situacao_veiculo', label: 'Alterar Situação do Veículo (PARADO ⇄ RODANDO)' }
+    { id: 'pode_alterar_situacao_veiculo', label: 'Alterar Situação do Veículo (PARADO ⇄ RODANDO)' },
+    { id: 'pode_adicionar_laudo', label: 'Adicionar Laudo' }
   ];
 
   const PERMISSOES_EXTRA_FORCA = [
@@ -8594,7 +8597,7 @@ function FrotaView({ vehicles, onSelectVehicle, userPermissions, laudosGeral }) 
 
 
 
-function DetalhesVeiculoView({ veiculo, chamados, rawChamados, colaboradores, hoje, currentUser, onVoltar, onUpdate, onDelete, laudosGeral, setLaudosGeral }) {
+function DetalhesVeiculoView({ veiculo, chamados, rawChamados, colaboradores, hoje, currentUser, onVoltar, onUpdate, onDelete, laudosGeral, setLaudosGeral, userPermissions }) {
 
   const [activeTab, setActiveTab] = useState('dados');
 
@@ -8604,8 +8607,9 @@ function DetalhesVeiculoView({ veiculo, chamados, rawChamados, colaboradores, ho
 
   const [isModalEquipeOpen, setIsModalEquipeOpen] = useState(false);
 
-  const isGerente = ['GERENTE', 'COORDENADOR', 'ADMINISTRADOR'].includes(currentUser.perfil);
-  const canEditLaudo = isGerente || (currentUser?.setor === 'Operações' && currentUser?.perfil === 'FROTA');
+  const isGerente = ['GERENTE', 'COORDENADOR', 'ADMINISTRADOR'].includes(currentUser?.perfil?.toUpperCase());
+  const temPermissaoEspecial = userPermissions?.permissoes_edicao?.pode_adicionar_laudo === true;
+  const canEditLaudo = isGerente || temPermissaoEspecial || (currentUser?.setor?.toUpperCase() === 'OPERAÇÕES' && currentUser?.perfil?.toUpperCase() === 'FROTA');
 
 
 
@@ -15287,7 +15291,9 @@ function ModalGraficosDashboard({ chartType, vehicles, chamados, hoje, onClose }
 
   const [filterTipo, setFilterTipo] = useState('');
 
-
+  const vehiclesMap = useMemo(() => {
+    return new Map((vehicles || []).map(v => [v.placa, v]));
+  }, [vehicles]);
 
   const chamadosFiltrados = chamados.filter(c => {
 

@@ -1,4 +1,9 @@
 @echo off
+set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot
+set PATH=%JAVA_HOME%\bin;%PATH%
+set ANDROID_HOME=C:\Android\Sdk
+set ANDROID_SDK_ROOT=C:\Android\Sdk
+
 echo ==============================================================================
 echo [1/3] Compilando assets web do projeto (Vite)...
 echo ==============================================================================
@@ -25,8 +30,7 @@ echo ===========================================================================
 cd android
 call gradlew.bat assembleRelease
 if %errorlevel% neq 0 (
-    echo [AVISO] Se o build falhar por falta de JDK 17/Android SDK local,
-    echo abra a pasta 'android' no Android Studio e clique em 'Build > Build APK(s)'.
+    echo [ERRO] Falha na compilacao do Gradle.
     cd ..
     pause
     exit /b %errorlevel%

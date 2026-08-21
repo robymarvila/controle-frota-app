@@ -1,111 +1,102 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { App } from '@capacitor/app';
+
+const FleetLocation = registerPlugin('FleetLocation');
 
 /**
- * PermissionService v2.0
+ * PermissionService v4.0 (100% Nativo via FleetLocation)
  * 
- * Serviço centralizado de verificação e solicitação de permissões Android.
- * Verifica: Localização (foreground + background), Otimização de Bateria (Doze), Notificações.
- * 
- * Integrado com a tela de onboarding do AutoFiscalizacaoView para
- * guiar o auditor pelas permissões necessárias.
+ * Gerencia o ciclo completo e verificação estrita de permissões:
+ * 1. Localização em Primeiro Plano (GPS Preciso)
+ * 2. Localização em Segundo Plano ("Permitir o tempo todo")
+ * 3. Notificações de Foreground Service (Android 13+)
+ * 4. Isenção de Economia de Bateria (Doze Mode / Sem Restrições)
  */
 class PermissionService {
   constructor() {
     this._cachedStatus = null;
     this._listeners = [];
+    this._initAppListener();
   }
 
   isNative() {
     return Capacitor.isNativePlatform();
   }
 
+  _initAppListener() {
+    if (this.isNative()) {
+      try {
+        App.addListener('appStateChange', async (state) => {
+          if (state.isActive) {
+            console.log('[PermissionService] App retornou ao foreground — revalidando permissões...');
+            await this.onResume();
+          }
+        });
+      } catch (e) {
+        console.warn('[PermissionService] Falha ao registrar appStateChange:', e);
+      }
+    }
+  }
+
   /**
-   * Verifica TODAS as permissões críticas e retorna um objeto de status.
-   * Retorna: { location, backgroundLocation, batteryOptimized, notifications, allGranted }
+   * Verifica TODAS as permissões críticas via chamada nativa Java no Android.
    */
   async checkAll() {
     if (!this.isNative()) {
-      // No modo web, simular tudo como concedido
       return {
+        locationForeground: true,
+        locationBackground: true,
         location: true,
-        backgroundLocation: true,
-        batteryOptimized: false, // false = SEM otimização = bom
         notifications: true,
+        batteryOptimized: false, // false = sem restrição = bom
+        batteryIgnored: true,
         allGranted: true,
       };
     }
 
-    const status = {
-      location: false,
-      backgroundLocation: false,
-      batteryOptimized: true, // true = COM otimização = ruim para background
-      notifications: false,
-      allGranted: false,
-    };
-
     try {
-      // 1. Verificar permissão de localização foreground
-      const { Geolocation } = await import('@capacitor/geolocation');
-      const locPerm = await Geolocation.checkPermissions();
-      status.location = locPerm.location === 'granted' || locPerm.coarseLocation === 'granted';
-      
-      // Background location — Android separa foreground de background
-      // Se coarseLocation ou location está granted, verificamos se background também
-      // No Android, 'granted' para background é retornado separadamente
-      // O plugin @capacitor/geolocation não diferencia bem — usamos o plugin BackgroundGeolocation
-      try {
-        const { registerPlugin } = await import('@capacitor/core');
-        const BGGeo = registerPlugin('BackgroundGeolocation');
-        // Se conseguimos chamar addWatcher com requestPermissions:false sem erro,
-        // a permissão background está concedida. Mas não queremos iniciar um watcher.
-        // Heurística: se location está granted e o plugin não rejeita, consideramos background OK
-        status.backgroundLocation = status.location; // Simplificação — o plugin solicita em runtime
-      } catch (e) {
-        status.backgroundLocation = status.location;
-      }
+      const res = await FleetLocation.checkAllPermissions();
+      const status = {
+        locationForeground: !!res.locationForeground,
+        locationBackground: !!res.locationBackground,
+        location: !!(res.locationForeground && res.locationBackground),
+        notifications: !!res.notifications,
+        batteryOptimized: !!res.batteryOptimized, // true = restrito (ruim)
+        batteryIgnored: !!res.batteryIgnored,     // true = sem restrição (bom)
+        allGranted: !!res.allGranted,
+      };
+
+      this._cachedStatus = status;
+      return status;
     } catch (e) {
-      console.warn('[PermissionService] Erro ao verificar localização:', e);
+      console.warn('[PermissionService] Erro ao checar permissões nativas:', e);
+      return {
+        locationForeground: false,
+        locationBackground: false,
+        location: false,
+        notifications: false,
+        batteryOptimized: true,
+        batteryIgnored: false,
+        allGranted: false,
+      };
     }
-
-    try {
-      // 2. Verificar otimização de bateria (Doze mode)
-      // Android: PowerManager.isIgnoringBatteryOptimizations()
-      // Capacitor não expõe isso diretamente — usamos um workaround via plugin
-      // Se REQUEST_IGNORE_BATTERY_OPTIMIZATIONS está no manifest, podemos solicitar
-      // Mas verificar requer código nativo. Usamos heurística:
-      // Se o plugin BGGeo funciona em background, Doze pode não ser problema.
-      // Para detecção real, precisaríamos de um plugin Capacitor customizado.
-      // Por ora, marcamos como 'desconhecido' e orientamos o usuário a verificar manualmente
-      status.batteryOptimized = 'unknown'; // Orientar usuário a desativar manualmente
-    } catch (e) {
-      console.warn('[PermissionService] Erro ao verificar bateria:', e);
-    }
-
-    try {
-      // 3. Verificar permissão de notificações (Android 13+)
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      const notifPerm = await LocalNotifications.checkPermissions();
-      status.notifications = notifPerm.display === 'granted';
-    } catch (e) {
-      console.warn('[PermissionService] Erro ao verificar notificações:', e);
-    }
-
-    // allGranted = tudo OK
-    status.allGranted = status.location && status.notifications;
-
-    this._cachedStatus = status;
-    return status;
   }
 
   /**
-   * Solicita permissão de localização foreground
+   * Solicita localização passo-a-passo (Primeiro Plano -> Segundo Plano / "O tempo todo")
    */
   async requestLocation() {
     if (!this.isNative()) return true;
     try {
-      const { Geolocation } = await import('@capacitor/geolocation');
-      const result = await Geolocation.requestPermissions({ permissions: ['location', 'coarseLocation'] });
-      return result.location === 'granted' || result.coarseLocation === 'granted';
+      const status = await this.checkAll();
+      if (!status.locationForeground) {
+        const res1 = await FleetLocation.requestLocationForeground();
+        if (!res1?.granted) return false;
+      }
+
+      // Se já tem foreground, pede background ("Permitir o tempo todo")
+      const res2 = await FleetLocation.requestLocationBackground();
+      return !!(res2?.granted || res2?.openedSettings);
     } catch (e) {
       console.warn('[PermissionService] Erro ao solicitar localização:', e);
       return false;
@@ -113,14 +104,13 @@ class PermissionService {
   }
 
   /**
-   * Solicita permissão de notificações (Android 13+)
+   * Solicita permissão nativa de notificações (Android 13+)
    */
   async requestNotifications() {
     if (!this.isNative()) return true;
     try {
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      const result = await LocalNotifications.requestPermissions();
-      return result.display === 'granted';
+      const res = await FleetLocation.requestNotificationPermission();
+      return !!res?.granted;
     } catch (e) {
       console.warn('[PermissionService] Erro ao solicitar notificações:', e);
       return false;
@@ -128,40 +118,37 @@ class PermissionService {
   }
 
   /**
-   * Abre as configurações do app no Android (para o usuário conceder permissões manualmente)
+   * Solicita isenção de economia de bateria (Doze Mode)
+   */
+  async requestBatteryExemption() {
+    if (!this.isNative()) return true;
+    try {
+      const res = await FleetLocation.requestBatteryExemption();
+      return !!res?.isIgnoring;
+    } catch (e) {
+      console.warn('[PermissionService] Erro ao solicitar isenção de bateria:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Abre as configurações gerais do aplicativo
    */
   async openAppSettings() {
     if (!this.isNative()) return;
     try {
-      const { registerPlugin } = await import('@capacitor/core');
-      const BGGeo = registerPlugin('BackgroundGeolocation');
-      await BGGeo.openSettings();
+      await FleetLocation.openAppSettings();
     } catch (e) {
       console.warn('[PermissionService] Erro ao abrir configurações:', e);
     }
   }
 
-  /**
-   * Abre as configurações de bateria do app no Android.
-   * Em Android 6+, envia intent ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-   * via abertura das configurações do app (já que Capacitor não expõe isso diretamente).
-   */
   async openBatterySettings() {
-    if (!this.isNative()) return;
-    try {
-      // Usa o mesmo openSettings do plugin que abre a tela de detalhes do app
-      // onde o usuário pode ver e alterar a otimização de bateria
-      const { registerPlugin } = await import('@capacitor/core');
-      const BGGeo = registerPlugin('BackgroundGeolocation');
-      await BGGeo.openSettings();
-    } catch (e) {
-      console.warn('[PermissionService] Erro ao abrir configurações de bateria:', e);
-    }
+    return await this.requestBatteryExemption();
   }
 
   /**
-   * Chamado quando o app retorna ao foreground (resume).
-   * Re-verifica permissões e notifica listeners.
+   * Revalida todas as permissões e avisa listeners
    */
   async onResume() {
     const status = await this.checkAll();
@@ -171,9 +158,6 @@ class PermissionService {
     return status;
   }
 
-  /**
-   * Registra um listener para mudanças de permissão
-   */
   addListener(fn) {
     this._listeners.push(fn);
     return () => {
@@ -181,9 +165,6 @@ class PermissionService {
     };
   }
 
-  /**
-   * Retorna o último status verificado sem fazer nova consulta
-   */
   getCachedStatus() {
     return this._cachedStatus;
   }

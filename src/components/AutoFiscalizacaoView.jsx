@@ -436,43 +436,66 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
 
   const [loading, setLoading] = useState(true);
   
-  // ── Strict GPS Permission Block (com re-verificação ao retornar das configurações)
+  // ── Strict Permission Block (Verificação estrita de Localização O Tempo Todo, Bateria e Notificações)
   const [gpsBlocked, setGpsBlocked] = useState(false);
-  const [permStatus, setPermStatus] = useState({ location: false, backgroundLocation: false, batteryOptimized: 'unknown', notifications: false, allGranted: false });
+  const [permStatus, setPermStatus] = useState({
+    locationForeground: false,
+    locationBackground: false,
+    location: false,
+    batteryOptimized: true,
+    batteryIgnored: false,
+    notifications: false,
+    allGranted: false
+  });
+
+  const verifyAllPermissions = async (autoRequestMissing = false) => {
+    if (!gpsService.isNative()) return;
+    try {
+      let status = await permissionService.checkAll();
+      
+      if (autoRequestMissing && !status.allGranted) {
+        if (!status.locationForeground) {
+          await permissionService.requestLocation();
+        } else if (!status.locationBackground) {
+          await permissionService.requestLocation();
+        }
+        if (!status.notifications) {
+          await permissionService.requestNotifications();
+        }
+        if (status.batteryOptimized) {
+          await permissionService.requestBatteryExemption();
+        }
+        status = await permissionService.checkAll();
+      }
+
+      setPermStatus(status);
+      setGpsBlocked(!status.allGranted);
+      return status;
+    } catch (e) {
+      console.warn('[AutoFiscalização] Erro ao verificar permissões:', e);
+    }
+  };
 
   useEffect(() => {
     let active = true;
     let removeListener = null;
 
-    const verifyPermissions = async () => {
-      if (isMobileAuditor && gpsService.isNative()) {
-        const status = await permissionService.checkAll();
-        if (active) {
-          setPermStatus(status);
-          setGpsBlocked(!status.location);
-        }
-      }
-    };
-
-    verifyPermissions();
-
-    // Re-verificar permissões quando o app retorna ao foreground (após usuário conceder nas configurações)
     if (isMobileAuditor && gpsService.isNative()) {
+      // Primeira verificação ao abrir o app com disparo automático dos diálogos se faltar algo
+      verifyAllPermissions(true);
+
       removeListener = permissionService.addListener((status) => {
-        console.log('[AutoFiscalização] App retornou ao foreground — re-verificando permissões...', status);
+        console.log('[AutoFiscalização] App retornou ao foreground — revalidando permissões...', status);
         if (active) {
           setPermStatus(status);
-          setGpsBlocked(!status.location);
-          if (status.location) {
-            console.log('[AutoFiscalização] ✅ Permissão GPS concedida — desbloqueando tela');
-          }
+          setGpsBlocked(!status.allGranted);
         }
       });
     }
 
     return () => {
       active = false;
-      if (cleanupResume) cleanupResume();
+      if (removeListener) removeListener();
     };
   }, [isMobileAuditor]);
 
@@ -596,9 +619,24 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
 
   // ── Fetch Data
 
+  const myKnownTaskIdsRef = useRef(new Set());
+
   useEffect(() => {
 
     fetchAll();
+
+    const auditorKeys = [
+      currentUser?.login,
+      currentUser?.nome,
+      currentUser?.login?.toLowerCase(),
+      currentUser?.login?.split('@')[0]
+    ].filter(Boolean);
+
+    const isForMe = (auditorVal) => {
+      if (!auditorVal) return false;
+      const a = String(auditorVal).trim().toLowerCase();
+      return auditorKeys.some(k => a === String(k).trim().toLowerCase());
+    };
 
     const ch1 = supabase.channel('rt-af-ordens').on('postgres_changes', { event: '*', schema: 'public', table: 'autofiscalizacao_ordens' }, () => fetchOrdens()).subscribe();
 
@@ -606,21 +644,80 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
 
     const ch3 = supabase.channel('rt-af-wf').on('postgres_changes', { event: '*', schema: 'public', table: 'autofiscalizacao_workflows' }, () => fetchWorkflows()).subscribe();
 
-    const ch4 = supabase.channel('rt-af-fa').on('postgres_changes', { event: '*', schema: 'public', table: 'wfm_tarefas' }, () => fetchFieldAudits()).subscribe();
+    const ch4 = supabase.channel('rt-af-fa-central').on('postgres_changes', { event: '*', schema: 'public', table: 'wfm_tarefas' }, async (payload) => {
+      console.log('[Central Realtime WFM] Evento:', payload.eventType, payload);
+
+      const taskId = String(payload.new?.id || payload.old?.id || '');
+      const osNum = payload.new?.payload_dados?.osid || payload.new?.id_origem || payload.new?.id || payload.old?.id_origem || payload.old?.id;
+      const endereco = payload.new?.payload_dados?.endereco_completo || payload.new?.payload_dados?.rua || '';
+      const tipo = payload.new?.payload_dados?.tipo_atividade || payload.new?.categoria || 'Fiscalização';
+      const horario = payload.new?.planned_start ? new Date(payload.new.planned_start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+
+      const wasMine = myKnownTaskIdsRef.current.has(taskId);
+      const isNowMine = isForMe(payload.new?.auditor);
+
+      if (payload.eventType === 'INSERT') {
+        if (isNowMine) {
+          myKnownTaskIdsRef.current.add(taskId);
+          notificationService.notifyNewTask({ osNumber: osNum, endereco, tipoAtividade: tipo, horario, auditor: payload.new?.auditor });
+        }
+      } else if (payload.eventType === 'UPDATE') {
+        if (!wasMine && isNowMine) {
+          myKnownTaskIdsRef.current.add(taskId);
+          notificationService.notifyNewTask({ osNumber: osNum, endereco, tipoAtividade: tipo, horario, auditor: payload.new?.auditor });
+        } else if (wasMine && !isNowMine) {
+          myKnownTaskIdsRef.current.delete(taskId);
+          notificationService.notifyTaskRemoved({ osNumber: osNum, reason: 'A OS foi retirada da sua carga pelo controlador.' });
+        } else if (wasMine && isNowMine) {
+          if ((payload.new?.status === 'suspensa' || payload.new?.status === 'suspended') && payload.old?.status !== 'suspensa') {
+            notificationService.notifyTaskSuspended({ osNumber: osNum, reason: payload.new?.suspend_reason || 'Suspensão registrada pelo controlador.' });
+          } else if (payload.new?.planned_start && payload.old?.planned_start && payload.new.planned_start !== payload.old.planned_start) {
+            notificationService.notifyRouteReordered({ totalTasks: myKnownTaskIdsRef.current.size });
+          }
+        }
+      } else if (payload.eventType === 'DELETE') {
+        if (wasMine) {
+          myKnownTaskIdsRef.current.delete(taskId);
+          notificationService.notifyTaskRemoved({ osNumber: osNum, reason: 'A OS foi cancelada ou excluída no WFM.' });
+        }
+      }
+
+      fetchFieldAudits();
+    }).subscribe();
 
     const ch5 = supabase.channel('rt-af-colab').on('postgres_changes', { event: '*', schema: 'public', table: 'colaboradores' }, () => fetchColaboradores()).subscribe();
 
     const ch6 = supabase.channel('rt-af-field-audits').on('postgres_changes', { event: '*', schema: 'public', table: 'autofiscalizacao_field_audits' }, () => fetchFieldAudits()).subscribe();
 
+    let opListener = null;
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const FleetLocation = registerPlugin('FleetLocation');
+        FleetLocation.addListener('operationalUpdate', () => {
+          console.log('[AutoFiscalizacaoView] operationalUpdate recebido do Service nativo!');
+          fetchFieldAudits();
+        }).then(handle => { opListener = handle; });
+      } catch (e) {}
+    }
+
+    // Re-sincronização no retorno ao app ou ao ligar a tela
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAll();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
-
+      if (opListener) {
+        try { opListener.remove(); } catch (e) {}
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       supabase.removeChannel(ch1); supabase.removeChannel(ch2); supabase.removeChannel(ch3);
-
       supabase.removeChannel(ch4); supabase.removeChannel(ch5); supabase.removeChannel(ch6);
-
     };
 
-  }, []);
+  }, [currentUser?.login, currentUser?.nome]);
 
   const fetchOrdens = async () => { const { data } = await supabase.from('autofiscalizacao_ordens').select('*').order('data', { ascending: false }); if (data) setOrdens(data); };
 
@@ -703,6 +800,18 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
         });
 
         setFieldAudits(merged);
+        const auditorKeys = [
+          currentUser?.login,
+          currentUser?.nome,
+          currentUser?.login?.toLowerCase(),
+          currentUser?.login?.split('@')[0]
+        ].filter(Boolean);
+        const myTasksNow = merged.filter(t => {
+          if (!t || !t.auditor) return false;
+          const a = String(t.auditor).trim().toLowerCase();
+          return auditorKeys.some(k => a === String(k).trim().toLowerCase());
+        });
+        myKnownTaskIdsRef.current = new Set(myTasksNow.map(t => String(t.id || t.inspid)));
 
       }
 
@@ -1403,45 +1512,27 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
     const newTaskId = crypto.randomUUID();
 
     const histNew = [
-
+      ...(existing.historico || []),
       {
-
         timestamp: nowIso,
-
         usuario: 'Sistema',
-
         acao: 'WFM_REPROGRAMADO_SUSPENSA',
-
         observacao: `OS disponibilizada para reprogramação após ser suspensa pelo auditor. Motivo da suspensão: ${reason}`
-
       }
-
     ];
 
     const payloadNew = {
-
       id: newTaskId,
-
       modulo_origem: existing.modulo_origem || 'AUTOFISCALIZACAO',
-
       id_origem: existing.id_origem || `ALP-AUTO-NEW-${Date.now()}`,
-
       categoria: existing.categoria || 'AutoFiscalização - Campo',
-
-      auditor: existing.auditor,
-
-      assigned_date: existing.assigned_date,
-
+      auditor: '',
+      assigned_date: null,
       planned_start: null,
-
       planned_end: null,
-
-      status: 'pending',
-
+      status: 'pendente',
       historico: histNew,
-
       payload_dados: existing.payload_dados
-
     };
 
     const { error: err2 } = await supabase.from('wfm_tarefas').insert(payloadNew);
@@ -1630,65 +1721,55 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
 
   if (isMobileAuditor) {
 
-    const myTasks = Array.from(new Map(fieldAudits.filter(t => t.auditor === (currentUser?.login || currentUser?.nome)).map(t => [t.inspid, t])).values());
+    const sortedMobileAudits = useMemo(() => {
+      const auditorKeys = [
+        currentUser?.login,
+        currentUser?.nome,
+        currentUser?.login?.toLowerCase(),
+        currentUser?.login?.split('@')[0]
+      ].filter(Boolean);
 
-    const allMobileAudits = myTasks.map(t => {
-
-      const wf = filteredWorkflows.find(w => w.inspid === t.inspid);
-
-      const os = filteredOrdens.find(o => o.nr_ordem === (t.payload_dados?.osid || t.id_origem));
-
-      let mobileStatus = 'pending';
-
-      if (t.status === 'concluida' || t.status === 'completed') mobileStatus = 'completed';
-
-      else if (t.status === 'suspensa' || t.status === 'suspended') mobileStatus = 'suspended';
-
-      else if (inProgressAudit?.inspid === t.inspid || t.status === 'iniciada' || t.status === 'started') mobileStatus = 'started';
-
-      return {
-
-        ...wf,
-
-        ...os,
-
-        inspid: t.inspid,
-
-        osid: t.payload_dados?.osid || t.id_origem || os?.nr_ordem || t.id_origem,
-
-        endereco_cliente: t.payload_dados?.endereco || os?.endereco_cliente || os?.endereco_completo || 'Endereço Não Informado',
-
-        link_mapa: os?.endereco_cliente || (typeof t.payload_dados?.endereco === 'string' && t.payload_dados.endereco.includes('maps') ? t.payload_dados.endereco : ''),
-
-        mobileStatus,
-
-        suspendReason: t.suspend_reason || '',
-
-        faData: t
-
+      const isMyTask = (t) => {
+        if (!t || !t.auditor) return false;
+        const a = String(t.auditor).trim().toLowerCase();
+        return auditorKeys.some(k => a === String(k).trim().toLowerCase());
       };
 
-    });
+      const myTasks = Array.from(new Map(fieldAudits.filter(isMyTask).map(t => [t.inspid, t])).values());
 
-    const getSentTime = (audit) => {
+      const allMobileAudits = myTasks.map(t => {
+        const wf = workflows.find(w => w.inspid === t.inspid);
+        const os = ordens.find(o => o.nr_ordem === (t.payload_dados?.osid || t.id_origem));
 
-      const logs = audit.faData?.historico || audit.historico || [];
+        let mobileStatus = 'pending';
+        if (t.status === 'concluida' || t.status === 'completed') mobileStatus = 'completed';
+        else if (t.status === 'suspensa' || t.status === 'suspended') mobileStatus = 'suspended';
+        else if (inProgressAudit?.inspid === t.inspid || t.status === 'iniciada' || t.status === 'started') mobileStatus = 'started';
 
-      if (logs.length > 0) {
+        return {
+          ...wf,
+          ...os,
+          inspid: t.inspid,
+          osid: t.payload_dados?.osid || t.id_origem || os?.nr_ordem || t.id_origem,
+          endereco_cliente: t.payload_dados?.endereco || os?.endereco_cliente || os?.endereco_completo || 'Endereço Não Informado',
+          link_mapa: os?.endereco_cliente || (typeof t.payload_dados?.endereco === 'string' && t.payload_dados.endereco.includes('maps') ? t.payload_dados.endereco : ''),
+          mobileStatus,
+          suspendReason: t.suspend_reason || '',
+          faData: t
+        };
+      });
 
-        const logTime = logs[0].data || logs[0].timestamp || audit.timestamp;
+      const getSentTime = (audit) => {
+        const logs = audit.faData?.historico || audit.historico || [];
+        if (logs.length > 0) {
+          const logTime = logs[0].data || logs[0].timestamp || audit.timestamp;
+          return new Date(logTime || 0).getTime();
+        }
+        return 0;
+      };
 
-        return new Date(logTime || 0).getTime();
-
-      }
-
-      return new Date(audit.timestamp || 0).getTime();
-
-    };
-
-    // Sorting: oldest routes first (chronological order of sending)
-
-    const sortedMobileAudits = allMobileAudits.sort((a, b) => getSentTime(a) - getSentTime(b));
+      return allMobileAudits.sort((a, b) => getSentTime(a) - getSentTime(b));
+    }, [fieldAudits, workflows, ordens, inProgressAudit, currentUser]);
 
     const getStatusStyle = (s) => {
 
@@ -1707,87 +1788,165 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
     };
 
     if (gpsBlocked) {
+      const isLocOk = permStatus.location;
+      const isNotifOk = permStatus.notifications;
+      const isBatteryOk = permStatus.batteryIgnored;
+
       return (
-        <div className="w-full h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300 overflow-y-auto">
-          <AlertTriangle size={64} className="text-red-500 mb-4 animate-pulse" />
-          <h2 className="text-white text-2xl font-black mb-2 uppercase tracking-widest">Acesso Bloqueado</h2>
-          <p className="text-slate-300 text-sm leading-relaxed mb-6 max-w-sm">
-            Para garantir a segurança em campo e o monitoramento em tempo real, o aplicativo exige as seguintes permissões:
+        <div className="w-full h-screen bg-slate-950 flex flex-col items-center justify-center p-5 text-center animate-in fade-in duration-300 overflow-y-auto">
+          <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-center mb-3 text-red-500 shadow-xl shadow-red-500/5">
+            <AlertTriangle size={34} className="animate-pulse" />
+          </div>
+          
+          <h2 className="text-white text-xl font-black mb-1 uppercase tracking-wider">
+            Permissões Obrigatórias
+          </h2>
+          <p className="text-slate-400 text-xs leading-relaxed mb-5 max-w-xs">
+            Para garantir a telemetria em segundo plano e a sua segurança, o aplicativo exige a liberação das 3 opções abaixo:
           </p>
           
-          <div className="w-full max-w-xs space-y-4 mb-8 text-left">
-            {/* Permissão de Localização */}
-            <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-2 shadow-lg border border-slate-700">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <MapPin size={18} className={permStatus.location ? "text-emerald-400" : "text-red-400"} />
-                  <span className="text-slate-100 font-semibold text-sm">Localização Contínua</span>
+          <div className="w-full max-w-sm space-y-3 mb-5 text-left">
+            {/* 1. Permissão de Localização */}
+            <div className={`p-4 rounded-2xl border transition-all ${isLocOk ? 'bg-slate-900/60 border-emerald-500/30' : 'bg-slate-900 border-red-500/40 shadow-lg shadow-red-500/5'}`}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2 rounded-xl ${isLocOk ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                    <MapPin size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-slate-100 font-bold text-xs">Localização Contínua</h3>
+                    <p className="text-[10px] text-slate-400">Opção: "Permitir o tempo todo"</p>
+                  </div>
                 </div>
-                {permStatus.location ? <CheckCircle2 size={18} className="text-emerald-400" /> : <XCircle size={18} className="text-red-400" />}
+                {isLocOk ? (
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
+                    <CheckCircle2 size={12} /> LIBERADO
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 px-2 py-1 rounded-lg border border-red-500/20">
+                    <XCircle size={12} /> PENDENTE
+                  </span>
+                )}
               </div>
-              {!permStatus.location && (
-                <button
-                  onClick={() => gpsService.openSettings()}
-                  className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 rounded-lg transition-colors uppercase"
-                >
-                  Permitir o tempo todo
-                </button>
+              
+              {!isLocOk && (
+                <div className="mt-3 pt-2 border-t border-slate-800 flex flex-col gap-1.5">
+                  <button
+                    onClick={async () => {
+                      await permissionService.requestLocation();
+                      verifyAllPermissions();
+                    }}
+                    className="w-full bg-blue-600 hover:bg-blue-500 active:scale-98 text-white text-xs font-black py-2.5 rounded-xl transition-all uppercase tracking-wider shadow-md shadow-blue-600/20"
+                  >
+                    1. Liberar Localização
+                  </button>
+                  <p className="text-[10px] text-slate-400 text-center">
+                    Selecione <strong>"Permitir o tempo todo"</strong> nas permissões.
+                  </p>
+                </div>
               )}
             </div>
 
-            {/* Otimização de Bateria */}
-            <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-2 shadow-lg border border-slate-700">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Zap size={18} className="text-warning" />
-                  <span className="text-slate-100 font-semibold text-sm">Otimização de Bateria</span>
+            {/* 2. Permissão de Notificações */}
+            <div className={`p-4 rounded-2xl border transition-all ${isNotifOk ? 'bg-slate-900/60 border-emerald-500/30' : 'bg-slate-900 border-amber-500/40 shadow-lg shadow-amber-500/5'}`}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2 rounded-xl ${isNotifOk ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                    <AlertCircle size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-slate-100 font-bold text-xs">Notificações em Tempo Real</h3>
+                    <p className="text-[10px] text-slate-400">Mantém o serviço de GPS em 1º plano</p>
+                  </div>
                 </div>
-                <AlertCircle size={18} className="text-warning" />
+                {isNotifOk ? (
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
+                    <CheckCircle2 size={12} /> LIBERADO
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20">
+                    <XCircle size={12} /> PENDENTE
+                  </span>
+                )}
               </div>
-              <p className="text-slate-400 text-xs">Deve estar como "Sem restrições" para não interromper o GPS.</p>
-              <button
-                onClick={() => permissionService.openBatterySettings()}
-                className="mt-1 w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2 rounded-lg transition-colors uppercase"
-              >
-                Verificar Bateria
-              </button>
+              
+              {!isNotifOk && (
+                <div className="mt-3 pt-2 border-t border-slate-800">
+                  <button
+                    onClick={async () => {
+                      await permissionService.requestNotifications();
+                      verifyAllPermissions();
+                    }}
+                    className="w-full bg-amber-600 hover:bg-amber-500 active:scale-98 text-white text-xs font-black py-2.5 rounded-xl transition-all uppercase tracking-wider shadow-md shadow-amber-600/20"
+                  >
+                    2. Ativar Notificações
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Notificações */}
-            <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-2 shadow-lg border border-slate-700">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <AlertCircle size={18} className={permStatus.notifications ? "text-emerald-400" : "text-red-400"} />
-                  <span className="text-slate-100 font-semibold text-sm">Notificações</span>
+            {/* 3. Otimização de Bateria */}
+            <div className={`p-4 rounded-2xl border transition-all ${isBatteryOk ? 'bg-slate-900/60 border-emerald-500/30' : 'bg-slate-900 border-amber-500/40 shadow-lg shadow-amber-500/5'}`}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2 rounded-xl ${isBatteryOk ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                    <Zap size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-slate-100 font-bold text-xs">Uso em Segundo Plano</h3>
+                    <p className="text-[10px] text-slate-400">Bateria sem restrições (Doze Mode)</p>
+                  </div>
                 </div>
-                {permStatus.notifications ? <CheckCircle2 size={18} className="text-emerald-400" /> : <XCircle size={18} className="text-red-400" />}
+                {isBatteryOk ? (
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
+                    <CheckCircle2 size={12} /> SEM RESTRIÇÃO
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20">
+                    <AlertCircle size={12} /> RESTRITO
+                  </span>
+                )}
               </div>
-              {!permStatus.notifications && (
-                <button
-                  onClick={() => permissionService.requestNotifications()}
-                  className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 rounded-lg transition-colors uppercase"
-                >
-                  Permitir Alertas
-                </button>
+              
+              {!isBatteryOk && (
+                <div className="mt-3 pt-2 border-t border-slate-800 flex flex-col gap-1.5">
+                  <button
+                    onClick={async () => {
+                      await permissionService.requestBatteryExemption();
+                      verifyAllPermissions();
+                    }}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white text-xs font-black py-2.5 rounded-xl transition-all uppercase tracking-wider shadow-md shadow-emerald-600/20"
+                  >
+                    3. Permitir em Segundo Plano
+                  </button>
+                  <p className="text-[10px] text-slate-400 text-center">
+                    Permite que o GPS funcione com a tela desligada.
+                  </p>
+                </div>
               )}
             </div>
           </div>
 
-          <button
-            onClick={async () => {
-              const status = await permissionService.checkAll();
-              setPermStatus(status);
-              setGpsBlocked(!status.location);
-            }}
-            className="w-full max-w-xs bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl shadow-lg transition-all text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95"
-          >
-            <Zap size={18} /> ABRIR CONFIGURAÇÕES
-          </button>
+          <div className="w-full max-w-sm flex flex-col gap-2">
+            <button
+              onClick={() => verifyAllPermissions(true)}
+              className="w-full bg-slate-800 hover:bg-slate-700 active:scale-98 text-white font-black py-3.5 rounded-xl border border-slate-700 transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+            >
+              <RefreshCw size={16} /> Reavaliar e Desbloquear
+            </button>
+
+            <button
+              onClick={() => permissionService.openAppSettings()}
+              className="text-xs text-slate-400 hover:text-slate-200 underline py-1 transition-colors"
+            >
+              Abrir Configurações do Aplicativo
+            </button>
+          </div>
         </div>
       );
     }
 
-    return (
+return (
 
       <div className="w-full h-screen bg-slate-50 flex flex-col overflow-hidden font-sans">
 
@@ -1806,6 +1965,8 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
             currentUser={currentUser}
 
             onLogout={onLogout}
+
+            onRefreshAll={fetchAll}
 
           />
 
@@ -6727,7 +6888,7 @@ function ImportScreen({ onImport, onConfirm, currentUser }) {
 
 // ══════════════════════════════════════════════════════════════
 
-function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectAudit, currentUser, onLogout }) {
+function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectAudit, currentUser, onLogout, onRefreshAll }) {
 
   // ── Tab State
 
@@ -6777,7 +6938,10 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
 
   // ── Loading Scale & Shift
 
-  const fetchShiftAndPref = async () => {
+  const auditsRef = useRef(audits);
+  auditsRef.current = audits;
+
+  const fetchShiftAndPref = async (isInitial = false) => {
 
     const todayStr = new Date().toLocaleDateString('en-CA');
 
@@ -6787,7 +6951,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
 
     try {
 
-      setScaleLoading(true);
+      if (isInitial) setScaleLoading(true);
 
       let esc = null;
 
@@ -6872,7 +7036,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
 
       setScale(esc);
       setShift(s || null);
-      setScaleLoading(false);
+      if (isInitial) setScaleLoading(false);
 
       const { data: p } = await supabase.from('autofiscalizacao_auditor_prefs').select('*').eq('auditor', auditorName).maybeSingle();
       if (p) setPref(p);
@@ -6887,77 +7051,48 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
 
     } catch (err) {
       console.error(err);
-      setScaleLoading(false);
+      if (isInitial) setScaleLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchShiftAndPref();
+    fetchShiftAndPref(true);
     notificationService.init();
 
-    // ── Escuta Realtime para novas OS atribuídas a este inspetor
-    const auditorLogin = currentUser?.login || currentUser?.nome;
-    if (auditorLogin) {
-      const channel = supabase
-        .channel(`rt-os-notif-${auditorLogin}`)
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'wfm_tarefas', filter: `auditor=eq.${auditorLogin}` },
-          (payload) => {
-            console.log('[Realtime OS] Nova tarefa inserida:', payload);
-            notificationService.notifyNewTask({
-              id: payload.new?.id,
-              title: payload.new?.titulo || 'Nova Ordem de Serviço',
-              description: payload.new?.descricao || `OS atribuída: ${payload.new?.os_numero || ''}`,
-              osNumber: payload.new?.os_numero,
-              auditor: auditorLogin,
-            });
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'wfm_tarefas' },
-          (payload) => {
-            if (payload.old?.auditor === auditorLogin && payload.new?.auditor !== auditorLogin) {
-              console.log('[Realtime OS] Tarefa removida deste auditor:', payload);
-              notificationService.notifyTaskRemoved({
-                id: payload.old?.id,
-                osNumber: payload.old?.os_numero || payload.new?.os_numero,
-                reason: 'A Ordem de Servico foi reatribuida ou removida da sua pauta.'
-              });
-            } else if (payload.old?.auditor !== auditorLogin && payload.new?.auditor === auditorLogin) {
-              console.log('[Realtime OS] Tarefa reatribuida para este auditor:', payload);
-              notificationService.notifyNewTask({
-                id: payload.new?.id,
-                title: payload.new?.titulo || 'Nova Ordem de Servico (Reatribuida)',
-                description: payload.new?.descricao || `OS reatribuida: ${payload.new?.os_numero || ''}`,
-                osNumber: payload.new?.os_numero,
-                auditor: auditorLogin,
-              });
-            }
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'DELETE', schema: 'public', table: 'wfm_tarefas' },
-          (payload) => {
-            if (payload.old?.auditor === auditorLogin) {
-              console.log('[Realtime OS] Tarefa deletada:', payload);
-              notificationService.notifyTaskRemoved({
-                id: payload.old?.id,
-                osNumber: payload.old?.os_numero,
-                reason: 'A Ordem de Servico foi cancelada ou excluida.'
-              });
-            }
-          }
-        )
-        .subscribe();
+    const auditorKeys = [
+      currentUser?.login,
+      currentUser?.nome,
+      currentUser?.login?.toLowerCase(),
+      currentUser?.login?.split('@')[0]
+    ].filter(Boolean);
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }
-  }, [currentUser]);
+    const isForMe = (auditorVal) => {
+      if (!auditorVal) return false;
+      const a = String(auditorVal).trim().toLowerCase();
+      return auditorKeys.some(k => a === String(k).trim().toLowerCase());
+    };
+
+    // ── Escuta Realtime para autofiscalizacao_shifts (Encerramento de Turno pelo Controlador)
+    const channelShifts = supabase
+      .channel('rt-shifts-mobile-sync')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'autofiscalizacao_shifts' },
+        (payload) => {
+          if (isForMe(payload.new?.auditor)) {
+            if (payload.new?.end_time && !payload.old?.end_time) {
+              notificationService.notifyShiftClosedByController();
+            }
+            fetchShiftAndPref(false);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channelShifts);
+    };
+  }, [currentUser?.login, currentUser?.nome]);
 
   // ── Live GPS Tracker Unificado (Nativo Android Foreground Service no APK + Contingência PWA no Web)
   useEffect(() => {
@@ -6966,15 +7101,17 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
       return;
     }
 
-    // Inicia rastreamento contínuo com motor duplo (deslocamento + heartbeat 30s)
+    // Inicia rastreamento contínuo nativo (guard interno impede reinício redundante)
     gpsService.startTracking(shift, (pos) => {
-      // Callback opcional de atualização em tempo real
+      // Callback opcional
     });
 
     return () => {
-      gpsService.stopTracking();
+      if (!shift || shift.end_time) {
+        gpsService.stopTracking();
+      }
     };
-  }, [shift]);
+  }, [shift?.id, shift?.start_time, shift?.end_time]);
 
   // ── Shift Action Handler
   const handleShiftAction = async (action) => {

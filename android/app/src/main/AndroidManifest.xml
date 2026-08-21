@@ -63,7 +63,11 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-
+        <service
+            android:name=".FleetLocationService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
     </application>
 

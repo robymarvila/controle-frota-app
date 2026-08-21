@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 
-import { History, ChevronLeft, ChevronRight, Settings, MapPin, Clock, Filter, AlertTriangle, Route, GripVertical, Plus, LayoutTemplate, Columns, Play, Pause, Trash2, X, FileText, Download, Map as MapIcon, HelpCircle, Eye, Users, Search, CalendarX, WifiOff, Wifi, PlayCircle, Navigation } from 'lucide-react';
+import { CheckCircle2, History, ChevronLeft, ChevronRight, Settings, MapPin, Clock, Filter, AlertTriangle, Route, GripVertical, Plus, LayoutTemplate, Columns, Play, Pause, Trash2, X, FileText, Download, Map as MapIcon, HelpCircle, Eye, Users, Search, CalendarX, WifiOff, Wifi, PlayCircle, Navigation } from 'lucide-react';
 
 import WFMMapView from './WFMMapView';
 
@@ -1467,48 +1467,40 @@ export default function WFMScreen({
 
   };
 
-  const handleAction = async (actionType, item, type) => {
-
+    const handleAction = async (actionType, item, type) => {
     if (actionType === 'desprogramar') {
-
       if (type === 'os') {
-
         if (onAssignAudit) onAssignAudit(item, '', null, null);
-
       } else {
-
         await supabase.from('autofiscalizacao_atividades_extras').delete().eq('id', item.id);
-
         onRefreshAtividades();
-
       }
-
     } else if (actionType === 'iniciar' || actionType === 'suspender') {
-
-      const newStatus = actionType === 'iniciar' ? 'iniciada' : 'pending';
-
+      const newStatus = actionType === 'iniciar' ? 'iniciada' : 'suspensa';
       const histEntry = { timestamp: new Date().toISOString(), usuario: currentUser?.login || 'Sistema', acao: actionType === 'iniciar' ? 'INICIADA_GANTT' : 'SUSPENSA_GANTT' };
-
       if (type === 'os') {
-
         const hist = item.historico ? [...item.historico, histEntry] : [histEntry];
-
-        await supabase.from('autofiscalizacao_field_audits').update({ status: newStatus, historico: hist }).eq('inspid', item.inspid);
-
-        // Supabase Real-time will update the list
-
+        
+        // Atualiza na wfm_tarefas para o gantt
+        await supabase.from('wfm_tarefas').update({ status: newStatus, historico: hist }).eq('id', item.id);
+        
+        // Também tenta atualizar na antiga por garantia
+        await supabase.from('autofiscalizacao_field_audits').update({ status: newStatus }).eq('inspid', item.inspid);
+        
+        if (actionType === 'suspender') {
+           // Create the clone in wfm_tarefas
+           const { id, created_at, status, auditor, planned_start, planned_end, ...cloneData } = item;
+           cloneData.status = 'pendente';
+           cloneData.auditor = '';
+           cloneData.historico = [...(cloneData.historico || []), { timestamp: new Date().toISOString(), usuario: currentUser?.login || 'Sistema', acao: 'CLONE_SUSPENSA', observacao: 'Atividade desmembrada devido a suspensão no Gantt.' }];
+           await supabase.from('wfm_tarefas').insert(cloneData);
+        }
       } else {
-
         await supabase.from('autofiscalizacao_atividades_extras').update({ status: newStatus }).eq('id', item.id);
-
         onRefreshAtividades();
-
       }
-
     }
-
     setGanttActionItem(null);
-
   };
 
   const bucketPanel = (isFloating) => (
@@ -3662,105 +3654,93 @@ export default function WFMScreen({
 }
 
 function ActionPopover({ data, onClose, onAction, onViewDetails }) {
-
   const { item, type, rect, label, address, base } = data;
+  
+  const status = (item.status || 'pendente').toLowerCase();
+  const isStarted = status === 'iniciada' || status === 'in_progress';
+  const isSuspended = status === 'suspensa' || status === 'suspended';
+  const isCompleted = status === 'concluido' || status === 'completed' || status === 'concluida';
+  
+  const formatStatus = (s) => {
+     if (isCompleted) return 'Concluída';
+     if (isSuspended) return 'Suspensa';
+     if (isStarted) return 'Iniciada';
+     return 'Despachada / Pendente';
+  };
+  
+  const statusColor = isCompleted ? 'text-blue-600 bg-blue-50' : (isSuspended ? 'text-amber-600 bg-amber-50' : (isStarted ? 'text-emerald-600 bg-emerald-50' : 'text-slate-600 bg-slate-50'));
 
-  const isStarted = item.status === 'iniciada' || item.status === 'in_progress';
-
-  const isCompleted = item.status === 'concluido' || item.status === 'completed';
+  const payload = item.payload_dados || {};
+  const enderecoFull = payload.endereco_completo || payload.endereco_cliente || payload.endereco || address;
+  const tStart = payload.fisc_started_at;
+  const tEnd = payload.fisc_finished_at;
 
   return (
-
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={onClose}>
-
       <div className="bg-white rounded-2xl shadow-2xl overflow-hidden w-full max-w-sm border border-slate-100 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-
         <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-start">
-
           <div>
-
             <h3 className="font-black text-slate-800 flex items-center gap-2">
-
               {type === 'os' ? <FileText size={16} className="text-blue-600" /> : <AlertTriangle size={16} className="text-purple-600" />}
-
               {label}
-
             </h3>
-
-            <p className="text-xs text-slate-500 mt-1 font-medium">{address}</p>
-
+            <span className={`mt-2 inline-flex items-center px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border border-current/10 ${statusColor}`}>
+              {formatStatus(status)}
+            </span>
           </div>
-
           <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-lg"><X size={16} className="text-slate-500" /></button>
-
         </div>
-
         <div className="p-4 space-y-3">
+          
+          <div className="text-xs font-bold text-slate-600 flex items-start gap-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
+             <MapPin size={14} className="text-slate-400 shrink-0 mt-0.5" />
+             <span className="line-clamp-2">{enderecoFull || 'Sem Endereço'}</span>
+          </div>
 
           {base && (
-
             <div className="text-xs font-bold text-slate-600 flex items-center gap-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
-
               <Route size={14} className="text-slate-400" /> Base: {base}
-
             </div>
-
+          )}
+          <div className="text-xs font-bold text-slate-600 flex items-center gap-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
+            <Clock size={14} className="text-slate-400" /> Turno Programado: {new Date(item.planned_start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+          </div>
+          
+          {(tStart || tEnd) && (
+            <div className="text-xs font-bold text-slate-600 flex flex-col gap-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
+              {tStart && <div className="flex items-center gap-1"><Play size={12} className="text-emerald-500" /> Início: {new Date(tStart).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>}
+              {tEnd && <div className="flex items-center gap-1"><CheckCircle2 size={12} className="text-blue-500" /> Fim: {new Date(tEnd).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>}
+            </div>
           )}
 
-          <div className="text-xs font-bold text-slate-600 flex items-center gap-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
-
-            <Clock size={14} className="text-slate-400" /> Turno Programado: {new Date(item.planned_start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-
-          </div>
-
           <div className="flex flex-col gap-2 pt-2">
-
-            {!isStarted && !isCompleted && (
-
+            {!isStarted && !isCompleted && !isSuspended && (
               <button onClick={() => onAction('iniciar')} className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl transition-colors shadow-sm">
-
                 <Play size={14} /> Iniciar Atividade
-
               </button>
-
             )}
-
-            {isStarted && !isCompleted && (
-
+            {isStarted && !isCompleted && !isSuspended && (
               <button onClick={() => onAction('suspender')} className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-xl transition-colors shadow-sm">
-
                 <Pause size={14} /> Suspender Atividade
-
               </button>
-
             )}
-
-            <button onClick={() => onAction('desprogramar')} className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-600 font-black text-xs rounded-xl transition-colors">
-
-              <Trash2 size={14} /> Desprogramar do Gantt
-
-            </button>
+            
+            {!isStarted && !isCompleted && !isSuspended && (
+              <button onClick={() => onAction('desprogramar')} className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-600 font-black text-xs rounded-xl transition-colors">
+                <Trash2 size={14} /> Desprogramar do Gantt
+              </button>
+            )}
 
             {type === 'os' && (
-
               <button onClick={onViewDetails} className="w-full mt-2 flex items-center justify-center gap-2 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[10px] rounded-lg transition-colors border border-blue-200">
-
                 Ver Todos os Detalhes da OS
-
               </button>
-
             )}
-
           </div>
-
         </div>
-
       </div>
-
     </div>
-
   );
-
 }
 
 function ActivityModal({ auditorLogin, dateStr, onClose, onSave }) {
