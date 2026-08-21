@@ -21,7 +21,7 @@ import {
   Filter, FileSignature, Upload, X, AlertTriangle,
   ClipboardCheck, PlayCircle, User, History, Send, UserPlus, Tv,
   List, Grid, Database, EyeOff, LogOut, ArrowLeftRight, CalendarX,
-  CloudLightning, Loader2, RefreshCw, Contact, Map as MapIcon
+  CloudLightning, Loader2, RefreshCw, Contact, Map as MapIcon, Compass
 } from 'lucide-react';
 
 import {
@@ -418,6 +418,46 @@ const fetchPublicIP = async () => {
 
 };
 
+// ─── BOTÃO FLUTUANTE DE CENTRALIZAÇÃO GPS (LEAFLET) ───────────
+function RecenterMapButton({ currentMapPos }) {
+  const map = useMap();
+  const [isLocating, setIsLocating] = useState(false);
+
+  const handleRecenter = async () => {
+    setIsLocating(true);
+    try {
+      if (currentMapPos && currentMapPos[0] && currentMapPos[1]) {
+        map.flyTo(currentMapPos, 17, { animate: true, duration: 1.0 });
+      } else {
+        const fix = await Promise.race([
+          gpsService.getCurrentPositionFix(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+        ]);
+        if (fix?.latitude && fix?.longitude) {
+          map.flyTo([fix.latitude, fix.longitude], 17, { animate: true, duration: 1.0 });
+        }
+      }
+    } catch (e) {
+      console.warn('[RecenterMap] Erro ao centralizar:', e);
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
+  return (
+    <div className="leaflet-bottom leaflet-right" style={{ marginBottom: '22px', marginRight: '14px', pointerEvents: 'auto', zIndex: 1000 }}>
+      <button
+        type="button"
+        onClick={handleRecenter}
+        title="Centralizar na minha localização"
+        className="w-12 h-12 bg-white/95 backdrop-blur-md hover:bg-slate-50 active:scale-90 text-blue-600 rounded-2xl shadow-2xl border border-slate-200/80 flex items-center justify-center transition-all cursor-pointer group"
+      >
+        <Navigation size={22} className={`text-blue-600 fill-blue-50 transition-transform ${isLocating ? 'animate-spin text-blue-400' : 'group-hover:scale-110'}`} />
+      </button>
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ──────────────────────────────────────────
 
 export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMobileAuditor, onLogout }) {
@@ -623,7 +663,7 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
 
   useEffect(() => {
 
-    fetchAll();
+    fetchAll(true);
 
     const auditorKeys = [
       currentUser?.login,
@@ -700,10 +740,10 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
       } catch (e) {}
     }
 
-    // Re-sincronização no retorno ao app ou ao ligar a tela
+    // Re-sincronização silenciosa no retorno ao app ou ao ligar a tela (sem unmount ou perda de formulários)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        fetchAll();
+        fetchAll(false);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -825,14 +865,15 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
 
   const fetchColaboradores = async () => { const { data } = await supabase.from('colaboradores').select('*').order('nome', { ascending: true }); if (data) setColaboradoresList(data); };
 
-  const fetchAll = async () => {
-
-    setLoading(true);
-
-    await Promise.all([fetchOrdens(), fetchInspecoes(), fetchWorkflows(), fetchFieldAudits(), fetchColaboradores()]);
-
-    setLoading(false);
-
+  const fetchAll = async (isInitial = false) => {
+    if (isInitial) setLoading(true);
+    try {
+      await Promise.all([fetchOrdens(), fetchInspecoes(), fetchWorkflows(), fetchFieldAudits(), fetchColaboradores()]);
+    } catch (err) {
+      console.error('[AutoFiscalizacaoView] Erro ao sincronizar dados:', err);
+    } finally {
+      if (isInitial) setLoading(false);
+    }
   };
 
   // ── Filtered by Regional
@@ -6942,110 +6983,94 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
   auditsRef.current = audits;
 
   const fetchShiftAndPref = async (isInitial = false) => {
-
     const todayStr = new Date().toLocaleDateString('en-CA');
-
     const auditorName = currentUser?.login || currentUser?.nome;
-
     if (!auditorName) return;
 
-    try {
+    const auditorKeys = [
+      currentUser?.login,
+      currentUser?.nome,
+      currentUser?.login?.toLowerCase(),
+      currentUser?.login?.split('@')[0]
+    ].filter(Boolean);
 
+    try {
       if (isInitial) setScaleLoading(true);
 
       let esc = null;
-
       let s = null;
 
-      // 1. Buscar a escala do dia de hoje
+      // 1. Buscar a escala do dia de hoje (busca ampla pelos identificadores do auditor)
+      const { data: scalesToday } = await supabase.from('wfm_calendario_escalas').select('*').eq('date', todayStr);
+      esc = scalesToday?.find(item => {
+        if (!item.auditor) return false;
+        const a = item.auditor.trim().toLowerCase();
+        return auditorKeys.some(k => a === String(k).trim().toLowerCase());
+      }) || null;
 
-      const { data: escToday } = await supabase.from('wfm_calendario_escalas').select('*').eq('auditor', auditorName).eq('date', todayStr).maybeSingle();
-
-      esc = escToday;
-
-
-      // 2. Buscar o turno (shift) do dia de hoje
-
-      const { data: sToday } = await supabase.from('autofiscalizacao_shifts').select('*').eq('auditor', auditorName).eq('date', todayStr).maybeSingle();
-
-      s = sToday;
+      // 2. Buscar o turno (shift) do dia de hoje (busca ampla pelos identificadores do auditor)
+      const { data: shiftsToday } = await supabase.from('autofiscalizacao_shifts').select('*').eq('date', todayStr);
+      s = shiftsToday?.find(item => {
+        if (!item.auditor) return false;
+        const a = item.auditor.trim().toLowerCase();
+        return auditorKeys.some(k => a === String(k).trim().toLowerCase());
+      }) || null;
 
       // 3. Fallback para turnos de madrugada (jornada cruzando a meia-noite)
-
       if (!esc || !s) {
-
         const now = new Date();
-
         if (now.getHours() < 6) {
-
           const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
           const yesterdayStr = yesterday.toISOString().split('T')[0];
-
           if (!esc) {
-
-            const { data: escPrev } = await supabase.from('wfm_calendario_escalas').select('*').eq('auditor', auditorName).eq('date', yesterdayStr).maybeSingle();
-
+            const { data: scalesPrev } = await supabase.from('wfm_calendario_escalas').select('*').eq('date', yesterdayStr);
+            const escPrev = scalesPrev?.find(item => {
+              if (!item.auditor) return false;
+              const a = item.auditor.trim().toLowerCase();
+              return auditorKeys.some(k => a === String(k).trim().toLowerCase());
+            });
             if (escPrev) {
-
               const startH = escPrev.shift_start ? parseInt(escPrev.shift_start.split(':')[0], 10) : 0;
-
               const endH = escPrev.shift_end ? parseInt(escPrev.shift_end.split(':')[0], 10) : 0;
-
-              if (endH < startH) { // Indica que a jornada cruza a meia-noite
-
-                if (now.getHours() < endH || (now.getHours() === endH && now.getMinutes() === 0)) {
-
-                  esc = escPrev;
-
-                }
-
+              if (endH < startH && (now.getHours() < endH || (now.getHours() === endH && now.getMinutes() === 0))) {
+                esc = escPrev;
               }
-
             }
-
           }
-
           if (!s) {
-
-            const { data: sPrev } = await supabase.from('autofiscalizacao_shifts').select('*').eq('auditor', auditorName).eq('date', yesterdayStr).maybeSingle();
-
+            const { data: shiftsPrev } = await supabase.from('autofiscalizacao_shifts').select('*').eq('date', yesterdayStr);
+            const sPrev = shiftsPrev?.find(item => {
+              if (!item.auditor) return false;
+              const a = item.auditor.trim().toLowerCase();
+              return auditorKeys.some(k => a === String(k).trim().toLowerCase());
+            });
             if (sPrev) {
-
               const startH = sPrev.shift_start ? parseInt(sPrev.shift_start.split(':')[0], 10) : 0;
-
               const endH = sPrev.shift_end ? parseInt(sPrev.shift_end.split(':')[0], 10) : 0;
-
-              if (endH < startH) {
-
-                if (now.getHours() < endH || (now.getHours() === endH && now.getMinutes() === 0)) {
-
-                  s = sPrev;
-
-                }
-
+              if (endH < startH && (now.getHours() < endH || (now.getHours() === endH && now.getMinutes() === 0))) {
+                s = sPrev;
               }
-
             }
-
           }
-
         }
-
       }
 
       setScale(esc);
       setShift(s || null);
       if (isInitial) setScaleLoading(false);
 
-      const { data: p } = await supabase.from('autofiscalizacao_auditor_prefs').select('*').eq('auditor', auditorName).maybeSingle();
-      if (p) setPref(p);
+      const { data: p } = await supabase.from('autofiscalizacao_auditor_prefs').select('*').ilike('auditor', auditorName).maybeSingle();
+      if (p) {
+        setPref(p);
+        if (p.placa_veiculo && !modalPlaca) setModalPlaca(p.placa_veiculo);
+        if (p.telefone && !modalTelefone) setModalTelefone(p.telefone);
+      }
 
-      const { data: shs } = await supabase.from('autofiscalizacao_shifts').select('*').eq('auditor', auditorName);
+      const { data: shs } = await supabase.from('autofiscalizacao_shifts').select('*').ilike('auditor', auditorName);
       if (shs) setMyMonthlyShifts(shs);
 
-      // REDIRECIONAMENTO AUTOMÁTICO
-      if (esc && !s) {
+      // REDIRECIONAMENTO AUTOMÁTICO PARA PONTO SOMENTE NA CARGA INICIAL
+      if (isInitial && esc && (!s || !s.start_time)) {
         setActiveTab('ponto');
       }
 
@@ -7127,25 +7152,56 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
       if (action === 'meal_end') updates = { meal_end: now };
       if (action === 'end') updates = { end_time: now };
 
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          async (pos) => {
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
-            const speed = pos.coords.speed !== null && !isNaN(pos.coords.speed) ? pos.coords.speed * 3.6 : null;
-            updates.gps_lat = lat;
-            updates.gps_lng = lng;
-            updates.gps_last_update = now;
+      let lat = null;
+      let lng = null;
+      let speed = null;
+      let accuracy = null;
 
-            const { data } = await supabase
-              .from('autofiscalizacao_shifts')
-              .update(updates)
-              .eq('id', shift.id)
-              .select()
-              .single();
-            if (data) setShift(data);
+      try {
+        const fix = await Promise.race([
+          gpsService.getCurrentPositionFix(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+        ]);
+        if (fix?.latitude && fix?.longitude) {
+          lat = fix.latitude;
+          lng = fix.longitude;
+          speed = fix.speed || null;
+          accuracy = fix.accuracy || null;
+        }
+      } catch (e) {
+        try {
+          const pos = await new Promise((resolve, reject) => {
+            if (!navigator.geolocation) return reject(new Error('No geo'));
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 4000,
+              maximumAge: 60000
+            });
+          });
+          lat = pos.coords.latitude;
+          lng = pos.coords.longitude;
+          speed = pos.coords.speed !== null && !isNaN(pos.coords.speed) ? pos.coords.speed * 3.6 : null;
+          accuracy = pos.coords.accuracy || null;
+        } catch (e2) {}
+      }
 
-            // Grava ponto histórico da ação do turno
+      if (lat && lng) {
+        updates.gps_lat = lat;
+        updates.gps_lng = lng;
+        updates.gps_last_update = now;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('autofiscalizacao_shifts')
+          .update(updates)
+          .eq('id', shift.id)
+          .select()
+          .single();
+
+        if (data) {
+          setShift(data);
+          if (lat && lng) {
             try {
               await supabase.from('autofiscalizacao_gps_logs').insert({
                 shift_id: shift.id,
@@ -7153,31 +7209,15 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
                 date: shift.date,
                 lat,
                 lng,
-                accuracy: pos.coords.accuracy || null,
+                accuracy,
                 speed,
                 created_at: now,
               });
             } catch (e) {}
-          },
-          async () => {
-            const { data } = await supabase
-              .from('autofiscalizacao_shifts')
-              .update(updates)
-              .eq('id', shift.id)
-              .select()
-              .single();
-            if (data) setShift(data);
-          },
-          { enableHighAccuracy: true }
-        );
-      } else {
-        const { data } = await supabase
-          .from('autofiscalizacao_shifts')
-          .update(updates)
-          .eq('id', shift.id)
-          .select()
-          .single();
-        if (data) setShift(data);
+          }
+        }
+      } catch (err) {
+        console.error('[Ponto] Erro ao registrar ação de turno:', err);
       }
     }
   };
@@ -7189,74 +7229,135 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
     if (!modalTelefone || modalTelefone.replace(/\D/g, '').length < 10) {
       return alert('O número de telefone válido é obrigatório.');
     }
-    if (!hasConfirmedGpsPerm) {
-      return alert('É obrigatório confirmar as permissões de GPS e Bateria.');
-    }
 
     const cleanPlaca = modalPlaca.toUpperCase().replace(/\s+/g, '').trim();
     const cleanTelefone = modalTelefone.trim();
     const todayStr = new Date().toLocaleDateString('en-CA');
     const now = new Date().toISOString();
     const auditorName = currentUser?.login || currentUser?.nome;
+    const shiftDate = scale?.date || todayStr;
 
-    if (!navigator.geolocation) {
-      return alert('Seu navegador não suporta geolocalização.');
+    // 1. Obtenção resiliente de GPS com Timeout seguro de 4s (evita congelamento em Samsung)
+    let lat = null;
+    let lng = null;
+    let speed = null;
+    let accuracy = null;
+
+    try {
+      const fix = await Promise.race([
+        gpsService.getCurrentPositionFix(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+      ]);
+      if (fix?.latitude && fix?.longitude) {
+        lat = fix.latitude;
+        lng = fix.longitude;
+        speed = fix.speed || null;
+        accuracy = fix.accuracy || null;
+      }
+    } catch (e) {
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          if (!navigator.geolocation) return reject(new Error('No geo'));
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 4000,
+            maximumAge: 60000
+          });
+        });
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+        speed = pos.coords.speed !== null && !isNaN(pos.coords.speed) ? pos.coords.speed * 3.6 : null;
+        accuracy = pos.coords.accuracy || null;
+      } catch (e2) {
+        console.warn('[Ponto] GPS fix demorou ou falhou — iniciando turno com contingência:', e2);
+      }
     }
 
-    // Se estivermos na aba ponto, após iniciar queremos voltar para o painel ou agenda (dashboard/timeline)
-    // Para UX: vamos mudar para dashboard depois
-    
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        const speed = pos.coords.speed !== null && !isNaN(pos.coords.speed) ? pos.coords.speed * 3.6 : null;
-        const shiftDate = scale?.date || todayStr;
+    // 2. Salvar ou Atualizar Turno com UPSERT / UPDATE Seguro no Supabase
+    let savedShift = null;
+    try {
+      const { data: existingShift } = await supabase
+        .from('autofiscalizacao_shifts')
+        .select('*')
+        .ilike('auditor', auditorName)
+        .eq('date', shiftDate)
+        .maybeSingle();
 
+      const shiftPayload = {
+        auditor: auditorName,
+        date: shiftDate,
+        start_time: now,
+        placa_veiculo: cleanPlaca,
+        telefone: cleanTelefone,
+        gps_lat: lat,
+        gps_lng: lng,
+        gps_last_update: now
+      };
+
+      if (existingShift?.id) {
         const { data, error } = await supabase
           .from('autofiscalizacao_shifts')
-          .insert({
-            auditor: auditorName,
-            date: shiftDate,
-            start_time: now,
-            placa_veiculo: cleanPlaca,
-            telefone: cleanTelefone,
-            gps_lat: lat,
-            gps_lng: lng,
-            gps_last_update: now,
-          })
+          .update(shiftPayload)
+          .eq('id', existingShift.id)
           .select()
           .single();
+        if (error) throw error;
+        savedShift = data;
+      } else {
+        const { data, error } = await supabase
+          .from('autofiscalizacao_shifts')
+          .insert(shiftPayload)
+          .select()
+          .single();
+        if (error) throw error;
+        savedShift = data;
+      }
+    } catch (err) {
+      console.error('[Ponto] Erro ao salvar turno no Supabase:', err);
+      alert('Erro ao registrar início do turno: ' + (err.message || 'Falha de comunicação com o servidor.'));
+      return;
+    }
 
-        if (data) {
-          setShift(data);
-          setShowShiftModal(false);
+    if (savedShift) {
+      setShift(savedShift);
+      setShowShiftModal(false);
 
-          // Ponto inicial da jornada na telemetria
-          try {
-            await supabase.from('autofiscalizacao_gps_logs').insert({
-              shift_id: data.id,
-              auditor: data.auditor,
-              date: data.date,
-              lat,
-              lng,
-              accuracy: pos.coords.accuracy || null,
-              speed,
-              created_at: now,
-            });
-          } catch (e) {}
-        } else if (error) {
-          console.error(error);
-          alert('Erro ao iniciar turno.');
-        }
-      },
-      (err) => {
-        console.error(err);
-        alert('Permissão de GPS é obrigatória para iniciar o turno de trabalho.');
-      },
-      { enableHighAccuracy: true }
-    );
+      // Salva preferências do auditor
+      try {
+        await supabase
+          .from('autofiscalizacao_auditor_prefs')
+          .upsert({
+            auditor: auditorName,
+            placa_veiculo: cleanPlaca,
+            telefone: cleanTelefone,
+            updated_at: now
+          }, { onConflict: 'auditor' });
+      } catch (e) {}
 
+      // Inicia rastreamento de GPS nativo
+      try {
+        await gpsService.startTracking(savedShift, (p) => {});
+      } catch (e) {}
+
+      // Registra ponto de log inicial se coordenadas estiverem disponíveis
+      if (lat && lng) {
+        try {
+          await supabase.from('autofiscalizacao_gps_logs').insert({
+            shift_id: savedShift.id,
+            auditor: savedShift.auditor,
+            date: savedShift.date,
+            lat,
+            lng,
+            accuracy,
+            speed,
+            created_at: now
+          });
+        } catch (e) {}
+      }
+
+      // MUDA AUTOMATICAMENTE PARA A ABA TIMELINE (AGENDA DE OSs)
+      setActiveTab('timeline');
+    }
   };
 
   // ── Swap OS Sequence Handler
@@ -7917,13 +8018,21 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
             <MapContainer center={mapPoints[0] || [-23.6156, -46.6378]} zoom={12} className="w-full h-full z-10">
 
               <LayersControl position="topright">
-                <LayersControl.BaseLayer checked name="Mapa Padrão">
-                  <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+                <LayersControl.BaseLayer checked name="Google Trânsito ao Vivo">
+                  <TileLayer url="https://mt1.google.com/vt/lyrs=m,traffic&x={x}&y={y}&z={z}" attribution="Google Maps" />
                 </LayersControl.BaseLayer>
-                <LayersControl.BaseLayer name="Google Trânsito">
-                  <TileLayer url="https://mt1.google.com/vt/lyrs=m,traffic&x={x}&y={y}&z={z}" attribution="Google" />
+                <LayersControl.BaseLayer name="Satélite com Trânsito">
+                  <TileLayer url="https://mt1.google.com/vt/lyrs=y,traffic&x={x}&y={y}&z={z}" attribution="Google Maps" />
+                </LayersControl.BaseLayer>
+                <LayersControl.BaseLayer name="Mapa Vetor Limpo">
+                  <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" attribution="CARTO" />
+                </LayersControl.BaseLayer>
+                <LayersControl.BaseLayer name="Modo Noturno">
+                  <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png" attribution="CARTO" />
                 </LayersControl.BaseLayer>
               </LayersControl>
+
+              <RecenterMapButton currentMapPos={currentMapPos} />
 
               {sortedAudits.map((a, i) => {
 
@@ -7949,19 +8058,32 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
                   <Marker key={a.inspid + '-' + i} position={[lat, lng]} icon={mapMarkerIcon}>
 
                     <Popup>
-                      <div className="p-1 font-sans text-xs flex flex-col gap-2 min-w-[120px]">
+                      <div className="p-1 font-sans text-xs flex flex-col gap-2 min-w-[150px]">
                         <div>
-                          <strong className="block text-slate-800">OS: {a.osid}</strong>
-                          <span className="text-slate-500">Sequência: {label}</span>
+                          <strong className="block text-slate-800 text-sm">OS: {a.osid}</strong>
+                          <span className="text-slate-500 text-[11px] block">Sequência: {label}</span>
+                          {a.faData?.payload_dados?.tipo_atividade && (
+                            <span className="text-slate-400 text-[10px] block">{a.faData.payload_dados.tipo_atividade}</span>
+                          )}
                         </div>
-                        <a 
-                          href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="bg-emerald-600 hover:bg-emerald-700 !text-white text-white text-[10px] uppercase font-black tracking-wider text-center py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 mt-1.5 shadow-md shadow-emerald-600/20 transition-all active:scale-95"
-                        >
-                          <MapIcon size={12} /> Ir ao Endereço
-                        </a>
+                        <div className="flex gap-1.5 mt-1">
+                          <a 
+                            href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 !text-white text-white text-[10px] uppercase font-black tracking-wider text-center py-2 px-2 rounded-xl flex items-center justify-center gap-1 shadow-md shadow-emerald-600/20 transition-all active:scale-95"
+                          >
+                            <Navigation size={11} /> Maps
+                          </a>
+                          <a 
+                            href={`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="flex-1 bg-sky-600 hover:bg-sky-700 !text-white text-white text-[10px] uppercase font-black tracking-wider text-center py-2 px-2 rounded-xl flex items-center justify-center gap-1 shadow-md shadow-sky-600/20 transition-all active:scale-95"
+                          >
+                            <Compass size={11} /> Waze
+                          </a>
+                        </div>
                       </div>
                     </Popup>
                   </Marker>
@@ -7980,7 +8102,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
                   })}
                 >
                   <Popup>
-                    <div className="text-xs font-black text-slate-700">Minha Localização</div>
+                    <div className="text-xs font-black text-slate-700">Minha Localização Atual</div>
                   </Popup>
                 </Marker>
               )}
@@ -8277,7 +8399,7 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
             {!shift?.start_time ? (
               <div className="space-y-4 pt-2">
                 <p className="text-[11px] text-slate-500 leading-relaxed font-medium">
-                  Para iniciar seu turno de trabalho, informe os dados abaixo e confirme as permissões para rastreamento em tempo real.
+                  Para iniciar seu turno de trabalho, confirme a placa do veículo e o telefone de contato.
                 </p>
 
                 <div className="space-y-3">
@@ -8312,48 +8434,16 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
                   </div>
                 </div>
 
-                <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 text-left space-y-3 mt-4">
-                  <div className="flex items-center gap-2 text-amber-900 font-black text-xs uppercase tracking-wide">
-                    <AlertTriangle size={16} className="text-amber-600 shrink-0" />
-                    <span>Telemetria Contínua Obrigatória</span>
-                  </div>
-                  <div className="text-[11px] text-amber-950 space-y-2 leading-tight">
-                    <p><strong>GPS:</strong> "Permitir o tempo todo"</p>
-                    <p><strong>Bateria:</strong> "Sem Restrições"</p>
-                  </div>
-                  {gpsService.isNative() && (
-                    <button
-                      type="button"
-                      onClick={() => gpsService.openSettings()}
-                      className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] rounded-xl uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                    >
-                      <Zap size={14} /> Abrir Configurações
-                    </button>
-                  )}
-                </div>
-
-                <label className="flex items-start gap-2.5 p-3 bg-white border border-slate-200 rounded-xl cursor-pointer select-none text-left shadow-sm">
-                  <input
-                    type="checkbox"
-                    checked={hasConfirmedGpsPerm}
-                    onChange={e => setHasConfirmedGpsPerm(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
-                  />
-                  <span className="text-[10px] text-slate-700 font-medium leading-tight">
-                    Confirmo que configurei a localização <strong>O tempo todo</strong>.
-                  </span>
-                </label>
-
                 <button
                   onClick={handleStartShiftSubmit}
-                  disabled={!modalPlaca.trim() || !modalTelefone.trim() || !hasConfirmedGpsPerm}
+                  disabled={!modalPlaca.trim() || !modalTelefone.trim()}
                   className={`w-full font-black py-4 rounded-2xl shadow-lg transition-all text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 mt-4 ${
-                    modalPlaca.trim() && modalTelefone.trim() && hasConfirmedGpsPerm
-                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30'
+                    modalPlaca.trim() && modalTelefone.trim()
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30 cursor-pointer'
                       : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                   }`}
                 >
-                  <PlayCircle size={18} /> AUTORIZAR E INICIAR
+                  <PlayCircle size={18} /> SALVAR E INICIAR TURNO
                 </button>
               </div>
             ) : (

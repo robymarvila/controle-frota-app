@@ -395,28 +395,34 @@ export default function WFMMapView({
 
       <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
         <LayersControl position="topright">
-          <LayersControl.BaseLayer checked name="Mapa Padrão (Vetor)">
+          <LayersControl.BaseLayer checked name="Google Trânsito ao Vivo">
+            <TileLayer
+              url="https://mt1.google.com/vt/lyrs=m,traffic&x={x}&y={y}&z={z}"
+              attribution="Google Maps"
+            />
+          </LayersControl.BaseLayer>
+          <LayersControl.BaseLayer name="Satélite com Trânsito">
+            <TileLayer
+              url="https://mt1.google.com/vt/lyrs=y,traffic&x={x}&y={y}&z={z}"
+              attribution="Google Maps"
+            />
+          </LayersControl.BaseLayer>
+          <LayersControl.BaseLayer name="Mapa Padrão (CARTO)">
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              attribution='&copy; CARTO'
             />
           </LayersControl.BaseLayer>
-          <LayersControl.BaseLayer name="Satélite Premium (Esri)">
+          <LayersControl.BaseLayer name="Satélite Puro (Esri)">
             <TileLayer
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              attribution="Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
+              attribution="Esri"
             />
           </LayersControl.BaseLayer>
-          <LayersControl.BaseLayer name="Visão Híbrida / Trânsito">
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors"
-            />
-          </LayersControl.BaseLayer>
-          <LayersControl.BaseLayer name="Modo Noturno (Premium)">
+          <LayersControl.BaseLayer name="Modo Noturno (Dark)">
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              attribution='&copy; CARTO'
             />
           </LayersControl.BaseLayer>
         </LayersControl>
