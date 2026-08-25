@@ -1,6 +1,5 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
-
-const FleetLocation = registerPlugin('FleetLocation');
+import { Capacitor } from '@capacitor/core';
+import FleetLocation from './fleetLocationPlugin';
 
 /**
  * NotificationService v3.1 (Material 3 Expressive & Native Android Integrated)

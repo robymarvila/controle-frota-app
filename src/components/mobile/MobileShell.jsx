@@ -25,6 +25,7 @@ const moduleTitles = {
   fidelizacao: 'Fidelização',
   autofiscalizacao: 'AutoFiscalização',
   wfm_despacho: 'WFM / Despacho',
+  status_auditores: 'Status Auditores',
   entrega_equipes: 'Entrega Equipes',
   forca: 'Força de Trabalho',
   colaboradores: 'Colaboradores',

@@ -10,6 +10,8 @@ dist-ssr/
 
 # Backups & Archives
 _backups/
+backups/
+scratch/
 *.zip
 *.tar.gz
 

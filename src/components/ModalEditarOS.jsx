@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Edit3, Save, MapPin, Clock, ShieldCheck, UserCheck, AlertCircle, Building2, Search, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { WFMToastList } from './WFMToast';
 
 const BASES_LIST = [
   'Fagundes Filho', 'Cajati', 'Vila Medeiros',
@@ -14,6 +15,16 @@ export default function ModalEditarOS({ os, auditors = [], onClose, onSaveSucces
 
   const isWfmTask = !!os.payload_dados;
   const rawData = isWfmTask ? os.payload_dados : os;
+
+  const [toasts, setToasts] = useState([]);
+  const addToast = (message, type = 'success', title = '') => {
+    const id = Date.now() + Math.random().toString();
+    const defaultTitle = type === 'success' ? 'Sucesso' : (type === 'error' ? 'Erro' : (type === 'warning' ? 'Atenção' : 'Informação'));
+    setToasts(prev => [...prev, { id, message, type, title: title || defaultTitle }]);
+  };
+  const removeToast = (id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   const [nrOrdem, setNrOrdem] = useState(rawData.osid || rawData.nr_ordem || os.os_numero || os.id_origem || '');
   const [equipe, setEquipe] = useState(rawData.equipe || '');
@@ -55,13 +66,13 @@ export default function ModalEditarOS({ os, auditors = [], onClose, onSaveSucces
 
   const handleCepSearch = async () => {
     const cleanCep = cep.replace(/\D/g, '');
-    if (cleanCep.length !== 8) return alert('Digite um CEP válido com 8 dígitos.');
+    if (cleanCep.length !== 8) return addToast('Digite um CEP válido com 8 dígitos.', 'warning', 'CEP Inválido');
     setIsGeocoding(true);
     try {
       const resp = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
       const data = await resp.json();
       if (data.erro) {
-        alert('CEP não encontrado.');
+        addToast('CEP não encontrado.', 'warning', 'CEP Não Encontrado');
       } else {
         setRua(data.logradouro || '');
         setBairro(data.bairro || '');
@@ -69,7 +80,7 @@ export default function ModalEditarOS({ os, auditors = [], onClose, onSaveSucces
         setEstado(data.uf || '');
       }
     } catch (e) {
-      alert('Erro ao buscar CEP.');
+      addToast('Erro ao buscar CEP.', 'error');
     } finally {
       setIsGeocoding(false);
     }
@@ -77,7 +88,7 @@ export default function ModalEditarOS({ os, auditors = [], onClose, onSaveSucces
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!nrOrdem || !equipe) return alert('Número da OS e Equipe são obrigatórios.');
+    if (!nrOrdem || !equipe) return addToast('Número da OS e Equipe são obrigatórios.', 'warning', 'Campos Obrigatórios');
 
     setIsSaving(true);
     try {
@@ -170,13 +181,12 @@ export default function ModalEditarOS({ os, auditors = [], onClose, onSaveSucces
         } catch (err) {}
       }
 
-      alert(`OS ${nrOrdem} atualizada com sucesso! Coordenadas gravadas: Lat ${lat || 'N/A'}, Lng ${lng || 'N/A'}`);
+      addToast(`OS ${nrOrdem} atualizada com sucesso!`, 'success', 'OS Atualizada');
       if (onSaveSuccess) onSaveSuccess(updatedPayload);
-      onClose();
-      if (window.location) window.location.reload();
+      setTimeout(() => onClose(), 600);
     } catch (err) {
       console.error(err);
-      alert('Erro ao salvar edições da OS: ' + err.message);
+      addToast('Erro ao salvar edições da OS: ' + err.message, 'error');
     } finally {
       setIsSaving(false);
     }
@@ -322,6 +332,9 @@ export default function ModalEditarOS({ os, auditors = [], onClose, onSaveSucces
           </div>
         </form>
       </div>
+
+      {/* ── TOAST NOTIFICATIONS ── */}
+      <WFMToastList toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }

@@ -1,223 +1,255 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-
-import { CheckCircle2, History, ChevronLeft, ChevronRight, Settings, MapPin, Clock, Filter, AlertTriangle, Route, GripVertical, Plus, LayoutTemplate, Columns, Play, Pause, Trash2, X, FileText, Download, Map as MapIcon, HelpCircle, Eye, Users, Search, CalendarX, WifiOff, Wifi, PlayCircle, Navigation } from 'lucide-react';
-
+import { CheckCircle2, History, ChevronLeft, ChevronRight, Settings, MapPin, Clock, Filter, AlertTriangle, Route, GripVertical, Plus, LayoutTemplate, Columns, Play, Pause, Trash2, X, FileText, Download, Map as MapIcon, HelpCircle, Eye, Users, Search, CalendarX, WifiOff, Wifi, PlayCircle, Navigation, Copy, Check, UserCheck } from 'lucide-react';
 import WFMMapView from './WFMMapView';
-
 import WFMBucketTree from './WFMBucketTree';
 import ModalHistoricoBuckets from './ModalHistoricoBuckets';
-
 import ModalDetalhesOS from './ModalDetalhesOS';
 import ModalEditarOS from './ModalEditarOS';
-
+import ModalStatusAuditor from './ModalStatusAuditor';
+import { WFMToastList, WFMConfirmModal } from './WFMToast';
 import { supabase } from '../supabaseClient';
 
+export function getOSTimesAndStatus(task, ordens = [], fieldAudits = [], workflows = [], inspecoes = []) {
+  if (!task) return {};
+  
+  const payload = task.payload_dados || task.os_data || {};
+  const osId = task.osid || payload.osid || task.id_origem || task.nr_ordem || task.inspid;
+  const inspId = task.id_origem || task.inspid || payload.inspid || payload.id_origem;
+
+  const matchedFa = (fieldAudits || []).find(f => 
+    (inspId && (f.inspid === inspId || f.id === inspId || f.id_origem === inspId)) || 
+    (osId && (f.osid === osId || f.payload_dados?.osid === osId || f.id_origem === osId || f.nr_ordem === osId))
+  ) || {};
+
+  const matchedOrdem = (ordens || []).find(o => o.nr_ordem === osId || o.nr_ordem === task.osid || o.nr_ordem === payload.osid) || {};
+  const matchedWf = (workflows || []).find(w => (inspId && w.inspid === inspId) || (osId && w.osid === osId)) || {};
+  const matchedInsp = (inspecoes || []).find(i => (inspId && i.inspid === inspId) || (osId && i.osid === osId)) || {};
+
+  // Combine logs strictly relevant to Field Audit (Etapa 3 - Campo) and WFM Task
+  const allHistLogs = [
+    ...(Array.isArray(task.historico) ? task.historico : []),
+    ...(Array.isArray(payload.historico) ? payload.historico : []),
+    ...(Array.isArray(matchedFa.historico) ? matchedFa.historico : []),
+    ...(Array.isArray(matchedWf.historico) ? matchedWf.historico : [])
+  ];
+
+  const getLogTime = (log) => {
+    if (!log) return null;
+    return log.timestamp || log.data || log.created_at || (log.id && typeof log.id === 'number' && log.id > 1700000000000 ? new Date(log.id).toISOString() : null);
+  };
+
+  // Find start time of FIELD AUDIT (Etapa 3 - Campo)
+  let realStartStr = matchedFa.start_time || task.start_time || payload.start_time;
+
+  if (!realStartStr) {
+    const startLog = allHistLogs.find(h => {
+      const a = (h.acao || '').toUpperCase();
+      const d = (h.detalhes || h.observacao || '').toUpperCase();
+      return a === 'AUDITORIA_CAMPO_INICIADA' || a === 'WFM_INICIADA' || a === 'WFM_INICIO' ||
+             (a.includes('INICIADA') && !a.includes('TURNO') && !a.includes('ESCALA') && !d.includes('AUTOFISCALIZAÇÃO'));
+    });
+    if (startLog) {
+      realStartStr = getLogTime(startLog);
+    }
+  }
+
+  // Find end time of FIELD AUDIT (Etapa 3 - Campo)
+  let realEndStr = matchedFa.end_time || task.end_time || payload.end_time;
+
+  if (!realEndStr) {
+    const endLog = allHistLogs.find(h => {
+      const a = (h.acao || '').toUpperCase();
+      const d = (h.detalhes || h.observacao || '').toUpperCase();
+      return a === 'AUDITORIA_CAMPO_CONCLUIDA' || a === 'AUDITORIA_CAMPO_SUSPENSA' || a === 'WFM_CONCLUIDA' || a === 'WFM_SUSPENSA';
+    });
+    if (endLog) {
+      realEndStr = getLogTime(endLog);
+    }
+  }
+
+  // Raw status from field audit or wfm task (Etapa 3)
+  const rawStatus = (matchedFa.status || task.status || '').toLowerCase();
+  const hasCompletedLog = allHistLogs.some(h => (h.acao || '').toUpperCase() === 'AUDITORIA_CAMPO_CONCLUIDA');
+  const hasSuspendedLog = allHistLogs.some(h => (h.acao || '').toUpperCase() === 'AUDITORIA_CAMPO_SUSPENSA');
+
+  let status = 'pending';
+  if (rawStatus === 'completed' || rawStatus === 'concluida' || rawStatus === 'concluido' || matchedFa.executed === true || hasCompletedLog) {
+    status = 'completed';
+  } else if (rawStatus === 'suspended' || rawStatus === 'suspensa' || rawStatus === 'suspenso' || hasSuspendedLog) {
+    status = 'suspended';
+  } else if (rawStatus === 'in_progress' || rawStatus === 'iniciada' || rawStatus === 'iniciado' || (realStartStr && !realEndStr)) {
+    status = 'in_progress';
+  }
+
+  const plannedStart = task.planned_start ? new Date(task.planned_start) : (payload.planned_start ? new Date(payload.planned_start) : (matchedFa.planned_start ? new Date(matchedFa.planned_start) : null));
+  const plannedEnd = task.planned_end ? new Date(task.planned_end) : (payload.planned_end ? new Date(payload.planned_end) : (matchedFa.planned_end ? new Date(matchedFa.planned_end) : null));
+  const plannedDurationMins = (plannedStart && plannedEnd)
+    ? Math.max(15, Math.round((plannedEnd.getTime() - plannedStart.getTime()) / 60000))
+    : (task.minutos || task.duracao || payload.duracao || payload.minutos || matchedOrdem.minutos || 60);
+
+  const realStart = realStartStr ? new Date(realStartStr) : null;
+  const realEnd = realEndStr ? new Date(realEndStr) : null;
+
+  let executedDurationMins = null;
+  if (realStart && realEnd) {
+    executedDurationMins = Math.max(1, Math.round((realEnd.getTime() - realStart.getTime()) / 60000));
+  } else if (realStart && status === 'in_progress') {
+    executedDurationMins = Math.max(1, Math.round((Date.now() - realStart.getTime()) / 60000));
+  }
+
+  return {
+    osId,
+    status,
+    realStart,
+    realEnd,
+    realStartStr,
+    realEndStr,
+    plannedStart,
+    plannedEnd,
+    plannedDurationMins,
+    executedDurationMins,
+    matchedFa,
+    matchedOrdem,
+    matchedWf,
+    matchedInsp
+  };
+}
+
 export default function WFMScreen({
-
   fieldAudits = [],
-
   ordens = [],
-
   workflows = [],
-
   inspecoes = [],
-
   atividadesExtras = [],
-
   shifts = [],
-
   escalas = [],
-
   onRefreshEscalas,
-
   currentUser,
-
   activeRegional,
-
   onAssignAudit,
-
   onViewDetails,
-
   onRefreshAtividades,
-
   onChangeTaskBase,
-
   selectedDate,
-
   setSelectedDate
-
 }) {
-
   const [historyAuditor, setHistoryAuditor] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [confirmModal, setConfirmModal] = useState(null);
+
+  const addToast = (message, type = 'success', title = '') => {
+    const id = Date.now() + Math.random().toString();
+    const defaultTitle = type === 'success' ? 'Sucesso' : (type === 'error' ? 'Erro' : (type === 'warning' ? 'Atenção' : 'Informação'));
+    setToasts(prev => [...prev, { id, message, type, title: title || defaultTitle }]);
+  };
+
+  const removeToast = (id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const askConfirm = ({ title, message, confirmText, cancelText, variant, onConfirm }) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      confirmText: confirmText || 'Confirmar',
+      cancelText: cancelText || 'Cancelar',
+      variant: variant || 'danger',
+      onConfirm: () => {
+        setConfirmModal(null);
+        if (onConfirm) onConfirm();
+      },
+      onCancel: () => setConfirmModal(null)
+    });
+  };
 
   const getAuditorHistory = (auditorLogin) => {
-
     const list = [];
-
     const scale = escalas.find(e => e.auditor === auditorLogin);
-
     const shift = shifts.find(s => s.auditor === auditorLogin);
-
     if (scale) {
-
       list.push({
-
         timestamp: scale.created_at || new Date().toISOString(),
-
         usuario: scale.created_by || 'Operador',
-
         acao: 'ESCALA_CRIADA',
-
         observacao: `Escala de trabalho definida: das ${scale.shift_start || '07:00'} às ${scale.shift_end || '17:00'}`
-
       });
-
     }
-
     if (shift) {
-
       if (shift.start_time) {
-
         list.push({
-
           timestamp: shift.start_time,
-
           usuario: auditorLogin,
-
           acao: 'TURNO_INICIADO',
-
           observacao: `Turno de trabalho iniciado. Veículo registrado: ${shift.placa_veiculo || 'Não informado'}. Localização de início: Lat: ${shift.gps_lat || '-'}, Lng: ${shift.gps_lng || '-'}`
-
         });
-
       }
-
       if (shift.meal_start) {
-
         list.push({
-
           timestamp: shift.meal_start,
-
           usuario: auditorLogin,
-
           acao: 'REFEICAO_INICIADA',
-
           observacao: 'Pausa para refeição iniciada.'
-
         });
-
       }
-
       if (shift.meal_end) {
-
         list.push({
-
           timestamp: shift.meal_end,
-
           usuario: auditorLogin,
-
-          acao: 'REFEICAO_FINALIZADA',
-
-          observacao: 'Retorno da pausa de refeição.'
-
+          acao: 'REFEICAO_ENCERRADA',
+          observacao: 'Retorno da pausa para refeição.'
         });
-
       }
-
       if (shift.end_time) {
-
         list.push({
-
           timestamp: shift.end_time,
-
           usuario: auditorLogin,
-
-          acao: 'TURNO_FINALIZADO',
-
-          observacao: 'Turno de trabalho encerrado.'
-
+          acao: 'TURNO_ENCERRADO',
+          observacao: 'Turno de trabalho finalizado.'
         });
-
       }
-
     }
 
     fieldAudits.forEach(fa => {
-
-      if (fa.historico) {
-
+      if (fa.auditor === auditorLogin && Array.isArray(fa.historico)) {
         fa.historico.forEach(h => {
-
-          const logDate = h.timestamp ? h.timestamp.split('T')[0] : '';
-
-          const isToday = logDate === dateStr;
-
-          const matchesAuditor = h.observacao?.includes(auditorLogin) || h.usuario === auditorLogin || fa.auditor === auditorLogin;
-
-          if (isToday && matchesAuditor) {
-
+          if (h && h.timestamp) {
             list.push({
-
               timestamp: h.timestamp,
-
               usuario: h.usuario || 'Operador',
-
               acao: h.acao,
-
-              observacao: `OS ${fa.os_data?.osid || fa.id_origem}: ${h.observacao}`
-
+              observacao: `OS ${fa.os_data?.osid || fa.id_origem}: ${h.observacao || h.detalhes || ''}`
             });
-
           }
-
         });
-
       }
-
     });
 
     return list.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
   };
 
   const handleTrackAuditor = (auditorLogin) => {
-
     const shift = shifts.find(s => s.auditor === auditorLogin);
-
     if (!shift || !shift.gps_lat || !shift.gps_lng) {
-
-      alert('Localização GPS do auditor não disponível ou turno não iniciado.');
-
+      addToast('Localização GPS do auditor não disponível ou turno não iniciado.', 'warning');
       return;
-
     }
-
     setViewMode('map');
-
     setSelectedBucketName(auditorLogin);
-
   };
 
   const [auditors, setAuditors] = useState([]);
-
+  const [statusAuditorModal, setStatusAuditorModal] = useState(null);
   const [prefs, setPrefs] = useState([]);
-
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('wfmViewMode') || 'dispatch');
-
   const [zoomLevel, setZoomLevel] = useState(30);
-
   const [auditorColWidth, setAuditorColWidth] = useState(250);
-
+  const unscheduledColWidth = 100;
   const [isResizing, setIsResizing] = useState(false);
-
   const [expandedBases, setExpandedBases] = useState({});
-
   const [showBucketDrawer, setShowBucketDrawer] = useState(false);
-
   const [showNewTaskModal, setShowNewTaskModal] = useState(false);
-
   const [showCalendarModal, setShowCalendarModal] = useState(false);
-
   const [selectedBucketName, setSelectedBucketName] = useState('');
   const [isBucketConfigMode, setIsBucketConfigMode] = useState(false);
   const [showInactiveBuckets, setShowInactiveBuckets] = useState(false);
@@ -255,310 +287,203 @@ export default function WFMScreen({
         try { localStorage.setItem('fleet_wfm_bucket_history_logs', JSON.stringify(newLogs)); } catch(e) {}
         return newLogs;
       });
-
+      addToast(next === 'INATIVO' ? `Bucket "${bucketName}" inativado temporariamente.` : `Bucket "${bucketName}" reativado com sucesso!`, 'info');
       return updated;
     });
   };
 
   const handleDeleteBucket = (bucketName) => {
-    if (!confirm('Deseja realmente excluir/inativar permanentemente este Bucket?')) return;
-    setBucketStatuses(prev => {
-      const updated = { ...prev, [bucketName]: 'INATIVO' };
-      try { localStorage.setItem('fleet_wfm_bucket_statuses', JSON.stringify(updated)); } catch(e) {}
-      
-      const newLog = {
-        id: Date.now(),
-        bucket_nome: bucketName,
-        acao: 'EXCLUSAO',
-        detalhes: 'Bucket excluído pelo usuário',
-        usuario: currentUser?.nome || currentUser?.login || 'Operador',
-        created_at: new Date().toISOString()
-      };
-      setBucketHistoryLogs(prevLogs => {
-        const newLogs = [newLog, ...prevLogs];
-        try { localStorage.setItem('fleet_wfm_bucket_history_logs', JSON.stringify(newLogs)); } catch(e) {}
-        return newLogs;
-      });
-
-      return updated;
+    askConfirm({
+      title: 'Excluir Bucket',
+      message: `Deseja realmente excluir/inativar permanentemente o Bucket "${bucketName}"?`,
+      confirmText: 'Excluir Bucket',
+      variant: 'danger',
+      onConfirm: () => {
+        setBucketStatuses(prev => {
+          const updated = { ...prev, [bucketName]: 'INATIVO' };
+          try { localStorage.setItem('fleet_wfm_bucket_statuses', JSON.stringify(updated)); } catch(e) {}
+          
+          const newLog = {
+            id: Date.now(),
+            bucket_nome: bucketName,
+            acao: 'EXCLUSAO',
+            detalhes: 'Bucket excluído pelo usuário',
+            usuario: currentUser?.nome || currentUser?.login || 'Operador',
+            created_at: new Date().toISOString()
+          };
+          setBucketHistoryLogs(prevLogs => {
+            const newLogs = [newLog, ...prevLogs];
+            try { localStorage.setItem('fleet_wfm_bucket_history_logs', JSON.stringify(newLogs)); } catch(e) {}
+            return newLogs;
+          });
+          return updated;
+        });
+        addToast(`Bucket "${bucketName}" excluído com sucesso!`, 'success');
+      }
     });
   };
 
   const [searchQuery, setSearchQuery] = useState('');
-
   const [selectedSearchOS, setSelectedSearchOS] = useState(null);
+
+  const handleOpenOSDetails = (osToOpen) => {
+    if (onViewDetails) {
+      onViewDetails(osToOpen);
+    } else {
+      setSelectedSearchOS(osToOpen);
+    }
+  };
+
   const [editingTask, setEditingTask] = useState(null);
-
   const [listMode, setListMode] = useState('grid'); // 'grid' or 'list'
-
   const [selectedOsIds, setSelectedOsIds] = useState([]);
 
   useEffect(() => {
-
     setSelectedOsIds([]);
-
   }, [selectedBucketName]);
 
   const [currentTime, setCurrentTime] = useState(new Date());
-
   const [showConfig, setShowConfig] = useState(null);
-
   const [showActivityModal, setShowActivityModal] = useState(null);
-
-  const [ganttActionItem, setGanttActionItem] = useState(null); // { type: 'os'|'extra', item, auditor, osData? }
+  const [ganttActionItem, setGanttActionItem] = useState(null);
 
   useEffect(() => { localStorage.setItem('wfmViewMode', viewMode); }, [viewMode]);
 
   const extractCoords = (fa) => {
-
     if (!fa) return null;
-
     if (fa.os_data?.latitude && fa.os_data?.longitude) {
-
       return { lat: parseFloat(fa.os_data.latitude), lng: parseFloat(fa.os_data.longitude) };
-
     }
-
     if (fa.latitude && fa.longitude) {
-
       return { lat: parseFloat(fa.latitude), lng: parseFloat(fa.longitude) };
-
     }
-
     if (fa.payload_dados?.latitude && fa.payload_dados?.longitude) {
-
       return { lat: parseFloat(fa.payload_dados.latitude), lng: parseFloat(fa.payload_dados.longitude) };
-
     }
-
     return null;
-
   };
 
   const getDistance = (lat1, lon1, lat2, lon2) => {
-
     if (!lat1 || !lon1 || !lat2 || !lon2) return 99999;
-
     const R = 6371; // km
-
     const dLat = (lat2 - lat1) * Math.PI / 180;
-
     const dLon = (lon2 - lon1) * Math.PI / 180;
-
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-
       Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
   };
 
   const handleOptimizeRoute = async (auditorLogin) => {
-
     const pref = prefs.find(p => p.auditor === auditorLogin);
-
-    if (!pref || !pref.start_lat) return alert('Ponto fixo do auditor não configurado.');
-
-    // Select both scheduled and non-programmed OS for this auditor
+    if (!pref || !pref.start_lat) return addToast('Ponto fixo de partida do auditor não configurado.', 'warning', 'Ponto Fixo');
 
     const myOs = fieldAudits.filter(f => f.auditor === auditorLogin && (!f.assigned_date || f.assigned_date === dateStr) && f.status === 'pending');
-
-    if (myOs.length === 0) return alert('Não há OS pendentes para otimizar.');
+    if (myOs.length === 0) return addToast('Não há OS pendentes para otimizar para este auditor.', 'info', 'Otimização');
 
     const startH = pref.shift_start ? parseInt(pref.shift_start.split(':')[0]) : 7;
-
     const startM = pref.shift_start ? parseInt(pref.shift_start.split(':')[1]) : 0;
-
     let currentSlot = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), startH, startM, 0);
-
     let route = [];
 
-    // 1. Try Premium OSRM Trip solver (TSP Roundtrip using real routing distances/times)
-
     const coordsList = myOs.map(extractCoords).filter(c => c !== null);
-
     if (coordsList.length > 0) {
-
       try {
-
         const osrmCoords = [
-
           `${pref.start_lng},${pref.start_lat}`,
-
           ...coordsList.map(c => `${c.lng},${c.lat}`)
-
         ].join(';');
-
         const url = `https://router.project-osrm.org/trip/v1/driving/${osrmCoords}?source=first&roundtrip=true`;
-
         const res = await fetch(url);
-
         const json = await res.json();
-
         if (json.code === 'Ok' && json.trips && json.trips[0] && json.waypoints) {
-
-          // Sort waypoints by waypoint_index to follow the computed trip order
-
           const sortedWaypoints = [...json.waypoints]
-
             .sort((a, b) => a.waypoint_index - b.waypoint_index)
-
             .filter(wp => wp.input_index > 0);
-
-          // Re-map to input OS objects
-
           route = sortedWaypoints.map(wp => myOs[wp.input_index - 1]);
-
         }
-
       } catch (err) {
-
         console.error("OSRM Route optimization failed, falling back to local greedy solver:", err);
-
       }
-
     }
 
-    // 2. Greedy TSP Fallback (Starts at home fixed point, finds closest step by step)
-
     if (route.length === 0) {
-
       let lastLat = pref.start_lat;
-
       let lastLng = pref.start_lng;
-
       let remaining = [...myOs];
 
       while (remaining.length > 0) {
-
         remaining.sort((a, b) => {
-
           const coordsA = extractCoords(a);
-
           const coordsB = extractCoords(b);
-
           const dA = getDistance(lastLat, lastLng, coordsA?.lat, coordsA?.lng);
-
           const dB = getDistance(lastLat, lastLng, coordsB?.lat, coordsB?.lng);
-
           return dA - dB;
-
         });
 
         const nextOs = remaining.shift();
-
         const coordsNext = extractCoords(nextOs);
-
         if (coordsNext) {
-
           lastLat = coordsNext.lat;
-
           lastLng = coordsNext.lng;
-
         }
-
         route.push(nextOs);
-
       }
-
     }
-
-    // Allocate sequentially in database
 
     for (const os of route) {
-
       currentSlot = findFreeSlot(currentSlot, auditorLogin, 60);
-
       const minutos = os.payload_dados?.minutos || os.os_data?.minutos || 60;
-
       if (onAssignAudit) {
-
         await onAssignAudit(os, auditorLogin, dateStr, currentSlot.toISOString());
-
       }
-
       currentSlot = new Date(currentSlot.getTime() + minutos * 60000);
-
     }
 
-    alert(`Rota otimizada com sucesso! ${route.length} OS ordenadas com sucesso na timeline.`);
-
+    addToast(`Rota otimizada com sucesso! ${route.length} OS ordenadas com sucesso na timeline.`, 'success', 'Rota Otimizada');
   };
 
   const startResizing = React.useCallback((e) => {
-
     e.preventDefault();
-
     setIsResizing(true);
-
   }, []);
 
   useEffect(() => {
-
     if (!isResizing) return;
-
     const handleMouseMove = (e) => {
-
       if (e.clientX > 150 && e.clientX < 400) setAuditorColWidth(e.clientX);
-
     };
-
     const handleMouseUp = () => setIsResizing(false);
-
     window.addEventListener('mousemove', handleMouseMove);
-
     window.addEventListener('mouseup', handleMouseUp);
-
     return () => {
-
       window.removeEventListener('mousemove', handleMouseMove);
-
       window.removeEventListener('mouseup', handleMouseUp);
-
     };
-
   }, [isResizing]);
 
   useEffect(() => {
-
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
-
     return () => clearInterval(timer);
-
   }, []);
 
   const fetchPrefs = async () => {
-
     const { data: prefsData } = await supabase.from('autofiscalizacao_auditor_prefs').select('*');
-
     if (prefsData) setPrefs(prefsData);
-
   };
 
   useEffect(() => {
-
     const fetchAuditors = async () => {
-
       let query = supabase.from('usuarios').select('*').ilike('perfil', '%auditor%');
-
       if (activeRegional && !['Global', 'Todas'].includes(activeRegional)) {
-
         query = query.eq('regional', activeRegional);
-
       }
-
       const { data: users } = await query;
-
       if (users) setAuditors(users);
-
       fetchPrefs();
-
     };
 
     fetchAuditors();
-
   }, [activeRegional]);
 
   // Use local time to prevent UTC day shifting
@@ -841,8 +766,6 @@ export default function WFMScreen({
 
     const seenOs = new Set();
 
-
-
     fieldAudits.forEach(fa => {
 
       const osId = getOsId(fa) || fa.osid || fa.id_origem || fa.payload_dados?.osid || fa.nr_ordem || '';
@@ -852,8 +775,6 @@ export default function WFMScreen({
       const auditorName = fa.auditor || '';
 
       const endereco = fa.payload_dados?.endereco || fa.address?.street || fa.endereco_cliente || '';
-
-
 
       if (
 
@@ -891,8 +812,6 @@ export default function WFMScreen({
 
     });
 
-
-
     ordens.forEach(o => {
 
       const osId = o.nr_ordem || o.osid || '';
@@ -900,8 +819,6 @@ export default function WFMScreen({
       const base = o.base || o.base_contrato || '';
 
       const endereco = o.endereco_cliente || o.endereco_completo || '';
-
-
 
       if (
 
@@ -937,13 +854,9 @@ export default function WFMScreen({
 
     });
 
-
-
     return list.slice(0, 15);
 
   }, [searchQuery, fieldAudits, ordens]);
-
-
 
   const getSelectedBucketDisplayName = () => {
 
@@ -971,11 +884,13 @@ export default function WFMScreen({
 
       setSelectedOsIds([]);
 
-      alert(`${selectedTasks.length} OS designadas com sucesso!`);
+      addToast(`${selectedTasks.length} OS designadas com sucesso para ${auditorLogin}!`, 'success', 'Alocação em Massa');
 
     } catch (err) {
 
       console.error(err);
+
+      addToast('Erro ao alocar tarefas em massa.', 'error');
 
     }
 
@@ -997,11 +912,13 @@ export default function WFMScreen({
 
       setSelectedOsIds([]);
 
-      alert(`Base de ${selectedTasks.length} OS alterada para ${newBase}!`);
+      addToast(`Base de ${selectedTasks.length} OS alterada para ${newBase}!`, 'success', 'Transferência de Base');
 
     } catch (err) {
 
       console.error(err);
+
+      addToast('Erro ao alterar base das OS em massa.', 'error');
 
     }
 
@@ -1170,189 +1087,112 @@ export default function WFMScreen({
   // Helper to find next free slot
 
   const findFreeSlot = (baseDate, auditorLogin, durationMins = 60) => {
-
     let slot = new Date(baseDate);
-
     let collision = true;
-
     const myOs = fieldAudits.filter(f => f.auditor === auditorLogin && f.assigned_date === dateStr && f.planned_start);
-
     const myExtras = atividadesExtras.filter(at => at.auditor === auditorLogin && at.data === dateStr && at.planned_start);
 
     while (collision) {
-
       collision = false;
-
       const slotEnd = new Date(slot.getTime() + durationMins * 60000);
-
       for (const fa of myOs) {
-
         const faStart = new Date(fa.planned_start);
-
         const faEnd = new Date(faStart.getTime() + 60 * 60000); // default 60min
-
         if ((slot >= faStart && slot < faEnd) || (slotEnd > faStart && slotEnd <= faEnd) || (slot <= faStart && slotEnd >= faEnd)) {
-
-          collision = true; break;
-
+          collision = true;
+          break;
         }
-
       }
 
       for (const at of myExtras) {
-
         const atStart = new Date(at.planned_start);
-
         const atEnd = new Date(at.planned_end || atStart.getTime() + 60 * 60000);
-
         if ((slot >= atStart && slot < atEnd) || (slotEnd > atStart && slotEnd <= atEnd) || (slot <= atStart && slotEnd >= atEnd)) {
-
-          collision = true; break;
-
+          collision = true;
+          break;
         }
-
       }
 
       if (collision) slot = new Date(slot.getTime() + 30 * 60000); // push 30 mins
-
     }
-
     return slot;
-
   };
 
   const handleDrop = async (e, auditorLogin, dropHourDecimal) => {
-
     e.preventDefault();
-
     e.stopPropagation();
 
-    // Validate that auditor has an active scale (escala) for today before dropping
-
     const escala = escalas.find(esc => esc.auditor === auditorLogin);
-
     if (!escala) {
-
-      alert('Não é possível alocar atividades para este auditor hoje: Auditor sem escala habilitada.');
-
+      addToast('Não é possível alocar atividades para este auditor hoje: Auditor sem escala habilitada.', 'warning', 'Escala Inativa');
       return;
-
     }
 
     const data = e.dataTransfer.getData('application/json');
-
     if (!data) return;
 
     const item = JSON.parse(data);
 
-    // Bloqueia drag se já iniciada (mas draggable já resolve parte disso)
-
     const isStarted = item.status === 'iniciada' || item.status === 'in_progress' || item.status === 'completed';
-
-    if (isStarted) { alert('Esta atividade já foi iniciada e não pode ser reprogramada.'); return; }
+    if (isStarted) {
+      addToast('Esta atividade já foi iniciada e não pode ser reprogramada.', 'warning', 'Atividade em Andamento');
+      return;
+    }
 
     let finalDateIso = null;
-
     if (dropHourDecimal !== -1) {
-
-      // Check if dropped in the past
-
       const dropDateForCheck = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), Math.floor(dropHourDecimal), Math.round((dropHourDecimal % 1) * 60), 0);
-
       if (dropDateForCheck.getTime() < new Date().getTime()) {
-
-        alert('Não é possível programar atividades no passado.');
-
+        addToast('Não é possível programar atividades no passado.', 'warning', 'Horário Inválido');
         return;
-
       }
-
     }
 
     if (dropHourDecimal !== -1) {
-
-      // Solto na Timeline
-
       const dropDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), Math.floor(dropHourDecimal), Math.round((dropHourDecimal % 1) * 60), 0);
-
-      // Evita sobreposição horizontal empurrando para o lado
-
       const freeSlot = findFreeSlot(dropDate, auditorLogin, item.minutos || 60);
-
       finalDateIso = freeSlot.toISOString();
-
-    } // se for -1, é "Não Programado", finalDateIso = null
+    }
 
     if (item.inspid || item.os_data) {
-
-      // É uma OS
-
       if (onAssignAudit) {
-
         const existingFa = fieldAudits.find(f => f.inspid === item.inspid) || {
-
           inspid: item.inspid,
-
           osid: getOsId(item) || item.osid,
-
           status: 'pending'
-
         };
-
-        onAssignAudit(existingFa, auditorLogin, dateStr, finalDateIso);
-
+        await onAssignAudit(existingFa, auditorLogin, dateStr, finalDateIso);
+        addToast(`OS alocada com sucesso para ${auditorLogin}!`, 'success', 'Alocação Concluída');
       }
-
     } else if (item.tipo_atividade) {
-
-      // É uma Extra Activity
-
       let endIso = null;
-
       if (finalDateIso) {
-
         const end = new Date(new Date(finalDateIso).getTime() + 60 * 60000);
-
         endIso = end.toISOString();
-
       }
-
-      await window.supabase.from('autofiscalizacao_atividades_extras').update({
-
+      await supabase.from('autofiscalizacao_atividades_extras').update({
         auditor: auditorLogin,
-
         planned_start: finalDateIso,
-
         planned_end: endIso
-
       }).eq('id', item.id);
-
       if (onRefreshAtividades) onRefreshAtividades();
-
+      addToast(`Atividade alocada com sucesso para ${auditorLogin}!`, 'success', 'Atividade Extra');
     }
-
   };
 
   const handleUnassignDrop = (e) => {
-
     e.preventDefault();
-
     e.stopPropagation();
-
     const data = e.dataTransfer.getData('application/json');
-
     if (!data) return;
-
     const item = JSON.parse(data);
-
     if (item.inspid && onAssignAudit && item.auditor) {
-
       const existingFa = fieldAudits.find(f => f.inspid === item.inspid);
-
-      if (existingFa) onAssignAudit(existingFa, '', null, null);
-
+      if (existingFa) {
+        onAssignAudit(existingFa, '', null, null);
+        addToast('OS desalocada e retornada ao Bucket!', 'info', 'Desalocação');
+      }
     }
-
   };
 
   const getAssignedOS = (auditorLogin) => {
@@ -1921,8 +1761,6 @@ export default function WFMScreen({
 
             )}
 
-
-
             {/* ── DROPDOWN FLUTUANTE DE BUSCA DA OS ── */}
 
             {searchQuery.trim() && (
@@ -1948,81 +1786,43 @@ export default function WFMScreen({
                 ) : (
 
                   searchResults.map((item, idx) => {
-
                     const statusUpper = (item.status || '').toUpperCase();
-
                     let statusBadgeClass = "bg-amber-500 text-white";
-
                     let statusLabel = "Pendente";
-
                     if (statusUpper === 'COMPLETED' || statusUpper === 'CONCLUIDO' || statusUpper === 'CONCLUÍDA') {
-
                       statusBadgeClass = "bg-blue-500 text-white";
-
                       statusLabel = "Concluída";
-
                     } else if (statusUpper === 'INICIADA' || statusUpper === 'INICIADO' || statusUpper === 'IN_PROGRESS') {
-
                       statusBadgeClass = "bg-emerald-500 text-white animate-pulse";
-
                       statusLabel = "Iniciada";
-
                     } else if (statusUpper === 'SUSPENDED' || statusUpper === 'SUSPENSA' || statusUpper === 'SUSPENSO') {
-
                       statusBadgeClass = "bg-rose-500 text-white";
-
                       statusLabel = "Suspensa";
-
                     }
 
-
-
                     return (
-
                       <div
-
                         key={idx}
-
                         onClick={() => {
-
-                          setSelectedSearchOS(item.raw);
-
+                          handleOpenOSDetails(item.raw);
                           setSearchQuery('');
-
                         }}
-
                         className="p-2.5 rounded-xl hover:bg-slate-100/80 transition-colors cursor-pointer border border-transparent hover:border-slate-200 group"
-
                       >
-
                         <div className="flex items-center justify-between mb-1">
-
                           <span className="font-black text-xs text-slate-800 group-hover:text-blue-600 transition-colors">
-
                             {item.osId}
-
                           </span>
-
                           <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${statusBadgeClass}`}>
-
                             {statusLabel}
-
                           </span>
-
                         </div>
-
                         <div className="text-[11px] text-slate-500 flex items-start gap-1">
-
                           <MapPin size={12} className="shrink-0 mt-0.5 text-slate-400 group-hover:text-blue-500 transition-colors" />
-
                           <span className="line-clamp-2">{item.address}</span>
-
                         </div>
-
                       </div>
-
                     );
-
                   })
 
                 )}
@@ -2034,93 +1834,54 @@ export default function WFMScreen({
           </div>
 
           <button
-
             onClick={() => setShowNewTaskModal(true)}
-
             className="h-10 px-6 bg-blue-600 hover:bg-blue-700 active:scale-[0.97] text-white text-xs font-black uppercase tracking-wider rounded-xl flex items-center gap-2 shadow-md shadow-blue-500/10 hover:shadow-blue-500/20 transition-all duration-200 shrink-0"
-
           >
-
             <Plus size={16} strokeWidth={3} /> Adicionar Atividade
-
           </button>
 
           {viewMode !== 'allocation' && (
-
             <div className="h-10 px-1 bg-slate-100/80 rounded-xl border border-slate-200/60 shadow-inner flex items-center gap-1">
-
               <button
-
                 onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d); }}
-
                 className="h-8 w-8 rounded-lg flex items-center justify-center transition-colors text-slate-500 hover:text-slate-800 bg-white/40 hover:bg-white shadow-sm active:scale-95"
-
               >
-
                 <ChevronLeft size={16} />
-
               </button>
 
               <button
-
                 onClick={() => setShowCalendarModal(true)}
-
                 className="h-8 px-4 bg-white hover:bg-slate-50 rounded-lg text-xs font-black uppercase tracking-wider text-slate-700 shadow-sm border border-slate-200/20 flex items-center gap-2 transition-colors"
-
               >
-
                 <Clock size={14} className="text-blue-500" />
-
                 {selectedDate.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' })}
-
               </button>
 
               <button
-
                 onClick={exportDailyToExcel}
-
                 title="Exportar Excel deste Dia"
-
                 className="h-8 w-8 rounded-lg flex items-center justify-center transition-colors text-emerald-600 hover:text-emerald-700 bg-white border border-emerald-100/40 shadow-sm active:scale-95"
-
               >
-
                 <Download size={16} />
-
               </button>
 
               {showCalendarModal && (
-
                 <Calendar3MonthsModal
-
                   currentDate={selectedDate}
-
                   onSelect={(d) => { setSelectedDate(d); setShowCalendarModal(false); }}
-
                   onClose={() => setShowCalendarModal(false)}
-
                 />
-
               )}
 
               <button
-
                 onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() + 1); setSelectedDate(d); }}
-
                 className="h-8 w-8 rounded-lg flex items-center justify-center transition-colors text-slate-500 hover:text-slate-800 bg-white/40 hover:bg-white shadow-sm active:scale-95"
-
               >
-
                 <ChevronRight size={16} />
-
               </button>
-
             </div>
-
           )}
-
         </div>
-
       </div>
 
       <div className="flex flex-1 overflow-hidden relative">
@@ -2311,6 +2072,48 @@ export default function WFMScreen({
 
                                 const isChecked = selectedOsIds.includes(fa.inspid);
 
+                                
+
+                                const timeInfo = getOSTimesAndStatus(fa, ordens, fieldAudits, workflows, inspecoes);
+
+                                const isCompleted = timeInfo.status === 'completed';
+
+                                const isStarted = timeInfo.status === 'in_progress';
+
+                                const isSuspended = timeInfo.status === 'suspended';
+
+                                
+
+                                let statusLabel = 'Não Iniciada / Livre';
+
+                                let statusBadgeClass = 'bg-slate-100 text-slate-700 border-slate-300';
+
+                                if (isCompleted) {
+
+                                  statusLabel = 'Concluída';
+
+                                  statusBadgeClass = 'bg-blue-600 text-white border-blue-600 shadow-xs';
+
+                                } else if (isStarted) {
+
+                                  statusLabel = 'Em Andamento';
+
+                                  statusBadgeClass = 'bg-emerald-600 text-white border-emerald-600 animate-pulse shadow-xs';
+
+                                } else if (isSuspended) {
+
+                                  statusLabel = 'Suspensa';
+
+                                  statusBadgeClass = 'bg-amber-500 text-slate-950 border-amber-500 font-black shadow-xs';
+
+                                } else if (fa.auditor) {
+
+                                  statusLabel = 'Programada';
+
+                                  statusBadgeClass = 'bg-sky-50 text-sky-800 border-sky-300 font-black';
+
+                                }
+
                                 return (
 
                                   <div
@@ -2323,7 +2126,7 @@ export default function WFMScreen({
 
                                     className={`bg-white border rounded-2xl p-4 shadow-sm cursor-grab hover:border-blue-400 hover:shadow-md transition-all duration-200 group flex flex-col justify-between
 
-                                      ${isChecked ? 'border-blue-500 ring-2 ring-blue-500/10' : (fa.status === 'pending' || fa.status === 'pendente' || !fa.auditor ? 'border-2 border-amber-500 bg-amber-50/20 shadow-md shadow-amber-500/10' : 'border-slate-200/80')}
+                                      ${isChecked ? 'border-blue-500 ring-2 ring-blue-500/10' : (isCompleted ? 'border-blue-200 bg-blue-50/10' : isStarted ? 'border-emerald-300 bg-emerald-50/20' : isSuspended ? 'border-amber-300 bg-amber-50/20' : (!fa.auditor ? 'border-2 border-amber-500 bg-amber-50/20 shadow-md shadow-amber-500/10' : 'border-slate-200/80'))}
 
                                     `}
 
@@ -2383,23 +2186,41 @@ export default function WFMScreen({
 
                                     <div className="border-t border-slate-100 pt-3 mt-4 flex flex-col gap-2">
 
-                                      <div className="flex items-center justify-between">
+                                      <div className="flex items-center justify-between gap-1">
 
-                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{fa.categoria || 'AutoFiscalização'}</span>
+                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest truncate">{fa.categoria || 'AutoFiscalização'}</span>
 
-                                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${fa.auditor ? 'text-blue-600 bg-blue-50 border-blue-100' : 'text-amber-800 bg-amber-100 border-amber-300 font-black'}`}>
+                                        <span className={`text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full border ${statusBadgeClass}`}>
 
-                                          {fa.auditor ? `Alocado (${fa.auditor})` : 'Não Alocado'}
+                                          {statusLabel}
 
                                         </span>
 
                                       </div>
 
+                                      {fa.auditor && (
+
+                                        <div className="text-[10px] font-bold text-slate-600 flex items-center justify-between bg-slate-50 px-2 py-1 rounded-lg">
+
+                                          <span className="text-slate-400 font-medium uppercase text-[9px]">Auditor:</span>
+
+                                          <span className="text-slate-800 font-bold truncate max-w-[140px]">{fa.auditor}</span>
+
+                                        </div>
+
+                                      )}
+
                                       <button
 
-                                        onClick={() => onViewDetails && onViewDetails(fa.os_data || fa)}
+                                        onClick={() => {
 
-                                        className="w-full py-2 text-xs font-black uppercase tracking-wider text-slate-600 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all flex items-center justify-center gap-1 active:scale-[0.98]"
+                                          const osToOpen = fa.os_data || fa;
+
+                                          handleOpenOSDetails(osToOpen);
+
+                                        }}
+
+                                        className="w-full py-2 text-xs font-black uppercase tracking-wider text-slate-600 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all flex items-center justify-center gap-1 active:scale-[0.98] cursor-pointer"
 
                                       >
 
@@ -2465,7 +2286,9 @@ export default function WFMScreen({
 
                                     <th className="p-3">Categoria</th>
 
-                                    <th className="p-3">Status</th>
+                                    <th className="p-3">Status Operacional</th>
+
+                                    <th className="p-3">Auditor</th>
 
                                     <th className="p-3 text-right">Ações</th>
 
@@ -2474,12 +2297,53 @@ export default function WFMScreen({
                                 </thead>
 
                                 <tbody className="divide-y divide-slate-100 text-xs">
-
                                   {unallocatedOsToShow.map(fa => {
 
                                     const osId = fa.os_data?.osid || fa.id_origem;
 
                                     const isChecked = selectedOsIds.includes(fa.inspid);
+
+                                    
+
+                                    const timeInfo = getOSTimesAndStatus(fa, ordens, fieldAudits, workflows, inspecoes);
+
+                                    const isCompleted = timeInfo.status === 'completed';
+
+                                    const isStarted = timeInfo.status === 'in_progress';
+
+                                    const isSuspended = timeInfo.status === 'suspended';
+
+                                    
+
+                                    let statusLabel = 'Não Iniciada';
+
+                                    let statusBadgeClass = 'bg-slate-100 text-slate-700 border-slate-300';
+
+                                    if (isCompleted) {
+
+                                      statusLabel = 'Concluída';
+
+                                      statusBadgeClass = 'bg-blue-600 text-white border-blue-600';
+
+                                    } else if (isStarted) {
+
+                                      statusLabel = 'Em Andamento';
+
+                                      statusBadgeClass = 'bg-emerald-600 text-white border-emerald-600 animate-pulse';
+
+                                    } else if (isSuspended) {
+
+                                      statusLabel = 'Suspensa';
+
+                                      statusBadgeClass = 'bg-amber-500 text-slate-950 border-amber-500 font-black';
+
+                                    } else if (fa.auditor) {
+
+                                      statusLabel = 'Programada';
+
+                                      statusBadgeClass = 'bg-sky-50 text-sky-800 border-sky-300 font-bold';
+
+                                    }
 
                                     return (
 
@@ -2525,11 +2389,33 @@ export default function WFMScreen({
 
                                         <td className="p-3">
 
-                                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${fa.auditor ? 'text-blue-600 bg-blue-50 border border-blue-100' : 'text-amber-600 bg-amber-50 border border-amber-100'}`}>
+                                          <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border ${statusBadgeClass}`}>
 
-                                            {fa.auditor ? `Alocado (${fa.auditor})` : 'Não Alocado'}
+                                            {statusLabel}
 
                                           </span>
+
+                                        </td>
+
+                                        <td className="p-3">
+
+                                          {fa.auditor ? (
+
+                                            <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+
+                                              {fa.auditor}
+
+                                            </span>
+
+                                          ) : (
+
+                                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
+
+                                              Não Alocado
+
+                                            </span>
+
+                                          )}
 
                                         </td>
 
@@ -2537,9 +2423,15 @@ export default function WFMScreen({
 
                                           <button
 
-                                            onClick={() => onViewDetails && onViewDetails(fa.os_data || fa)}
+                                            onClick={() => {
 
-                                            className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors inline-flex items-center gap-1"
+                                              const osToOpen = fa.os_data || fa;
+
+                                              handleOpenOSDetails(osToOpen);
+
+                                            }}
+
+                                            className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors inline-flex items-center gap-1 cursor-pointer"
 
                                           >
 
@@ -2684,135 +2576,87 @@ export default function WFMScreen({
                 title={`OS Não Alocadas (${bucketOS.length})`}
 
                 onClose={() => setShowBucketDrawer(false)}
-
                 onDrop={handleUnassignDrop}
-
                 onDragOver={handleDragOver}
-
               >
-
                 {renderBucketContent()}
-
               </DraggableWindow>
-
             )}
-
+            {/* Header Timeline */}
             <div className="flex border-b border-slate-200 bg-white sticky top-0 z-30 shadow-sm h-10 shrink-0">
-
               <div
-
-                className="flex-shrink-0 border-r border-slate-200 flex items-center justify-between px-3 relative bg-slate-50/80 backdrop-blur sticky left-0 z-40"
-
+                className="flex-shrink-0 border-r border-slate-200 flex items-center justify-between px-3 relative bg-slate-50/90 backdrop-blur sticky left-0 z-40"
                 style={{ width: auditorColWidth }}
-
               >
-
                 <button
-
                   onClick={() => setShowBucketDrawer(!showBucketDrawer)}
-
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded shadow-sm flex items-center gap-1 transition-colors z-50"
-
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-lg shadow-sm flex items-center gap-1 transition-colors z-50"
                   title="Abrir Modal Voador de OS Não Alocadas"
-
                 >
-
                   <Filter size={12} /> {bucketOS.length} OS Livres
-
                 </button>
-
                 <div
-
                   className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 z-50 transition-colors"
-
                   onMouseDown={startResizing}
-
                 ></div>
-
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Auditor</span>
-
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Auditor</span>
               </div>
 
+              {/* Coluna "NÃO PROG" Fixa/Congelada antes das 06:00 */}
+              <div
+                className="flex-shrink-0 border-r border-slate-200 bg-amber-50/90 flex items-center justify-center px-1 sticky z-40 text-[9px] font-black text-amber-800 uppercase tracking-wider shadow-[2px_0_6px_rgba(0,0,0,0.03)]"
+                style={{ left: auditorColWidth, width: unscheduledColWidth }}
+              >
+                Não Prog.
+              </div>
+
+              {/* Slots de Horários da Linha do Tempo */}
               <div className="flex flex-1 relative bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiNlMmU4ZjAiLz48L3N2Zz4=')]">
-
                 {timeSlots.map(slot => (
-
                   <div
-
                     key={`${slot.hour}-${slot.minute}`}
-
                     className="flex-shrink-0 border-r border-slate-200/50 flex items-center px-2 text-[10px] font-bold text-slate-500"
-
                     style={{ width: slotWidthPx }}
-
                   >
-
                     {slot.label}
-
                   </div>
-
                 ))}
-
                 {isToday && currentTime.getHours() >= minHour && currentTime.getHours() <= maxHour && (
-
                   <div
-
                     className="absolute top-0 bottom-0 w-px bg-red-500 z-40 shadow-[0_0_8px_rgba(239,68,68,0.6)]"
-
                     style={{ left: calcLeftPx(currentTime.toISOString()) }}
-
                   >
-
                     <div className="absolute -top-1 -translate-x-1/2 bg-red-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm">
-
                       {currentTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-
                     </div>
-
                   </div>
-
                 )}
-
               </div>
-
             </div>
 
+            {/* Linhas de Auditores */}
             <div className="flex-1 relative">
-
               {isToday && currentTime.getHours() >= minHour && currentTime.getHours() <= maxHour && (
-
                 <div
-
                   className="absolute top-0 bottom-0 w-px bg-red-500/50 z-30 pointer-events-none"
-
-                  style={{ left: auditorColWidth + calcLeftPx(currentTime.toISOString()) }}
-
+                  style={{ left: auditorColWidth + unscheduledColWidth + calcLeftPx(currentTime.toISOString()) }}
                 ></div>
-
               )}
 
               {auditors.map(auditor => {
-
                 const pref = prefs.find(p => p.auditor === auditor.login);
-
                 const assignedOs = getAssignedOS(auditor.login);
-
                 const assignedExtras = getAssignedExtras(auditor.login);
-
                 const auditorShifts = shifts.filter(s => s.auditor === auditor.login);
-
                 const shift = auditorShifts.find(s => !s.end_time) || auditorShifts[0];
-
                 const escala = escalas.find(e => e.auditor === auditor.login);
+                const auditorTelefone = shift?.telefone || shift?.phone || auditor?.telefone || auditor?.celular || pref?.telefone || auditor?.phone;
 
                 let shiftStatusIcon = <div className="w-2.5 h-2.5 rounded-full bg-slate-300 shadow-sm" title="Sem Calendário"></div>;
-
                 let bgClass = "bg-slate-100/70 text-slate-400 group-hover:bg-slate-100";
-
                 let statusText = "Sem Calendário Habilitado";
 
                 if (escala) {
-
                   if (shift && shift.start_time) {
                     if (shift.end_time) {
                       bgClass = "bg-blue-50/60 text-slate-800 group-hover:bg-blue-50";
@@ -2828,547 +2672,381 @@ export default function WFMScreen({
                       statusText = "Online";
                     }
                   } else {
-
                     bgClass = "bg-amber-50/50 text-slate-700 group-hover:bg-amber-50";
-
                     shiftStatusIcon = <div className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-sm" title="Offline - Turno Não Iniciado"></div>;
-
                     statusText = "Offline";
-
                   }
-
                 }
 
                 const shiftStartStr = escala?.shift_start || pref?.shift_start || '07:00';
-
                 const shiftEndStr = escala?.shift_end || pref?.shift_end || '18:00';
-
                 const sH = parseInt(shiftStartStr.split(':')[0], 10);
-
                 let eH = parseInt(shiftEndStr.split(':')[0], 10);
-
                 if (eH < sH) {
-
                   eH += 24;
-
                 }
 
                 const hatchStartPx = 0;
-
                 const hatchStartWidth = Math.max(0, (sH - minHour) * 60 * pxPerMin);
-
                 const hatchEndPx = Math.max(0, (eH - minHour) * 60 * pxPerMin);
-
                 const hatchEndWidth = Math.max(0, (maxHour - eH + 1) * 60 * pxPerMin);
 
                 return (
-
-                  <div key={auditor.login} className="flex border-b border-slate-200 hover:bg-slate-50 transition-colors group min-h-[70px]">
-
+                  <div key={auditor.login} className="flex border-b border-slate-200 hover:bg-slate-50 transition-colors group min-h-[72px]">
+                    {/* Coluna 1: Card do Auditor (Sticky left-0) */}
                     <div
-
                       className={`flex-shrink-0 border-r border-slate-200 transition-colors flex flex-col justify-center sticky left-0 z-20 p-3 shadow-[2px_0_12px_rgba(0,0,0,0.02)] ${bgClass}`}
-
                       style={{ width: auditorColWidth }}
-
                       onDrop={(e) => {
-
-                        if (!escala) return alert('Auditor sem escala de trabalho habilitada para hoje.');
-
+                        if (!escala) return addToast('Auditor sem escala de trabalho habilitada para hoje.', 'warning', 'Sem Escala');
                         handleDrop(e, auditor.login, -1);
-
                       }}
-
                       onDragOver={(e) => {
-
                         if (escala) handleDragOver(e);
-
                       }}
-
                     >
-
                       <div className="flex items-start justify-between">
-
                         <div
-
                           onClick={() => {
-
                             if (escala && shift && shift.start_time) {
-
                               handleTrackAuditor(auditor.login);
-
                             }
-
                           }}
-
                           className={`font-bold text-sm truncate pr-2 flex items-center gap-2 ${escala && shift && shift.start_time ? 'cursor-pointer hover:text-emerald-700 underline decoration-dotted' : ''}`}
-
                           title={escala && shift && shift.start_time ? 'Clique para ver localização em tempo real no mapa' : statusText}
-
                         >
-
                           {shiftStatusIcon} {auditor.nome || auditor.login}
-
                         </div>
-
                         <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1 shrink-0 bg-white/80 rounded-lg p-0.5 shadow-sm">
-
                           <button
-
                             disabled={!escala}
-
                             onClick={() => handleOptimizeRoute(auditor.login)}
-
                             className={`p-1 rounded ${!escala ? 'text-slate-300 cursor-not-allowed' : 'hover:bg-purple-100 text-purple-600'}`}
-
                             title={escala ? "Otimizar Rota (Distância Mínima)" : "Indisponível (Sem Escala)"}
-
                           >
-
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-wand-2"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z" /><path d="m14 7 3 3" /><path d="M5 6v4" /><path d="M19 14v4" /><path d="M10 2v2" /><path d="M7 8H3" /><path d="M21 16h-4" /><path d="M11 3H9" /></svg>
-
                           </button>
-
                           <button
-
                             disabled={!escala}
-
                             onClick={() => setShowActivityModal(auditor.login)}
-
                             className={`p-1 rounded ${!escala ? 'text-slate-300 cursor-not-allowed' : 'hover:bg-emerald-100 text-emerald-600'}`}
-
                             title={escala ? "Nova Atividade Extra" : "Indisponível (Sem Escala)"}
-
                           >
-
                             <Plus size={14} />
-
                           </button>
-
                           <button
-
                             onClick={() => setHistoryAuditor(auditor.login)}
-
                             className="p-1 hover:bg-slate-100 text-slate-600 rounded"
-
                             title="Histórico de Ações"
-
                           >
-
                             <History size={14} />
-
                           </button>
-
+                          <button onClick={() => setStatusAuditorModal(auditor)} className="p-1 hover:bg-indigo-100 text-indigo-600 rounded" title="Ver Vida do Auditor (Status, Trajetos e Telemetria)">
+                            <UserCheck size={14} />
+                          </button>
                           <button onClick={() => setShowConfig(auditor.login)} className="p-1 hover:bg-blue-100 text-blue-600 rounded" title="Ajustar Ponto/Turno/Escala">
-
                             <Settings size={14} />
-
                           </button>
-
                         </div>
-
                       </div>
 
                       <div className="flex flex-col gap-0.5 mt-1">
-
                         <div className="text-[10px] font-medium flex items-center gap-1 truncate opacity-80">
-
                           <Clock size={10} className="text-blue-400" /> {shiftStartStr} as {shiftEndStr}
-
                         </div>
-
-                        {escala && shift && shift.start_time && shift.placa_veiculo && (
-
-                          <div className="text-[10px] font-black text-emerald-700 flex items-center gap-1 mt-0.5">
-
-                            🚗 Placa: <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-mono uppercase text-[9px]">{shift.placa_veiculo}</span>
-
+                        {escala && shift && shift.start_time && (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                            {shift.placa_veiculo && (
+                              <div className="text-[10px] font-black text-emerald-700 flex items-center gap-1">
+                                🚗 <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-mono uppercase text-[9px]">{shift.placa_veiculo}</span>
+                              </div>
+                            )}
+                            {auditorTelefone && (
+                              <div className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
+                                📱 <span className="text-[9px] font-mono text-slate-800 bg-slate-200/70 px-1 py-0.2 rounded">{auditorTelefone}</span>
+                              </div>
+                            )}
                           </div>
-
                         )}
-
                         {!escala && (
-
                           <div className="text-[9px] font-black text-slate-400 uppercase tracking-wider mt-0.5">
-
                             Sem Calendário
-
                           </div>
-
                         )}
-
                       </div>
-
                     </div>
 
-                    {/* Área "Não Programado" (Unscheduled) */}
-
+                    {/* Coluna 2: Área "Não Programado" (Sticky left-[auditorColWidth]) */}
                     <div
-
-                      className="flex-shrink-0 w-24 border-r border-slate-200/50 bg-amber-50/40 hover:bg-amber-100/50 transition-colors relative z-10 flex flex-col gap-1 p-1"
-
+                      className="flex-shrink-0 border-r border-slate-200 bg-amber-50/50 hover:bg-amber-100/60 transition-colors sticky z-20 flex flex-col gap-1 p-1 shadow-[2px_0_6px_rgba(0,0,0,0.02)]"
+                      style={{ left: auditorColWidth, width: unscheduledColWidth }}
                       onDrop={(e) => handleDrop(e, auditor.login, -1)}
-
                       onDragOver={handleDragOver}
-
                     >
-
-                      <div className="text-[8px] font-black text-amber-600/70 text-center uppercase tracking-widest mt-1 mb-1">Não Prog.</div>
+                      <div className="text-[8px] font-black text-amber-700/70 text-center uppercase tracking-widest mt-0.5 mb-0.5">Não Prog.</div>
 
                       {assignedOs.filter(fa => !fa.planned_start).map(fa => {
-
                         const resolvedOsId = getOsId(fa) || 'OS Desconhecida';
-
                         const osData = ordens.find(o => o.nr_ordem === resolvedOsId);
-
                         const isStarted = fa.status === 'in_progress' || fa.status === 'iniciada' || fa.status === 'completed' || fa.status === 'concluido';
 
-                        const baseColorClass = getColorClasses(fa.status, 'os');
-
                         return (
-
                           <div
-
                             key={`os-${fa.inspid}`}
-
                             draggable={!isStarted}
-
                             onDragStart={(e) => handleDragStart(e, fa)}
-
                             onClick={(e) => {
-
                               const rect = e.currentTarget.getBoundingClientRect();
-
-                              setGanttActionItem({ type: 'os', item: fa, osData, rect, label: resolvedOsId, address: osData?.endereco_completo || 'Sem Endereço', base: osData?.base_contrato });
-
+                              setGanttActionItem({ 
+                                type: 'os', 
+                                item: fa, 
+                                osData, 
+                                rect, 
+                                label: resolvedOsId, 
+                                address: osData?.endereco_completo || 'Sem Endereço', 
+                                base: osData?.base_contrato 
+                              });
                             }}
-
-                            className={`w-full py-1.5 px-2 rounded border border-amber-200 bg-white text-[9px] font-black cursor-pointer shadow-sm relative overflow-hidden`}
-
+                            className="w-full py-1.5 px-2 rounded-lg border border-amber-200/80 bg-white text-[9px] font-black cursor-pointer shadow-xs relative overflow-hidden flex items-center hover:border-amber-300 transition-all"
                           >
-
-                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${baseColorClass}`} />
-
-                            <span className="truncate block ml-1">{resolvedOsId}</span>
-
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500" />
+                            <span className="truncate block ml-1.5 text-slate-800">{resolvedOsId}</span>
                           </div>
-
                         );
-
                       })}
 
                       {assignedExtras.filter(at => !at.planned_start).map(at => {
-
                         const isStarted = at.status === 'in_progress' || at.status === 'iniciada' || at.status === 'completed' || at.status === 'concluido';
 
-                        const baseColorClass = getColorClasses(at.status, 'extra');
-
                         return (
-
                           <div
-
                             key={`ex-${at.id}`}
-
                             draggable={!isStarted}
-
                             onDragStart={(e) => handleDragStart(e, at)}
-
                             onClick={(e) => {
-
                               const rect = e.currentTarget.getBoundingClientRect();
-
-                              setGanttActionItem({ type: 'extra', item: at, rect, label: at.tipo_atividade, address: at.comentario || 'Atividade Extra', base: '-' });
-
+                              setGanttActionItem({ 
+                                type: 'extra', 
+                                item: at, 
+                                rect, 
+                                label: at.tipo_atividade, 
+                                address: at.comentario || 'Atividade Extra', 
+                                base: '-' 
+                              });
                             }}
-
-                            className={`w-full py-1.5 px-2 rounded border border-amber-200 bg-white text-[9px] font-black cursor-pointer shadow-sm relative overflow-hidden`}
-
+                            className="w-full py-1.5 px-2 rounded-lg border border-purple-200/80 bg-white text-[9px] font-black cursor-pointer shadow-xs relative overflow-hidden flex items-center hover:border-purple-300 transition-all"
                           >
-
-                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${baseColorClass}`} />
-
-                            <span className="truncate block ml-1 text-purple-900">{at.tipo_atividade}</span>
-
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500" />
+                            <span className="truncate block ml-1.5 text-purple-900">{at.tipo_atividade}</span>
                           </div>
-
                         );
-
                       })}
-
                     </div>
 
+                    {/* Coluna 3: Timeline Lane Container (Inicia às 06:00) */}
                     <div className="flex flex-1 relative bg-slate-50/30">
-
                       {hatchStartWidth > 0 && (
-
                         <div className="absolute top-0 bottom-0 pointer-events-none opacity-50 z-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxwYXRoIGQ9Ik0tMiAxMGwxMi0xMk02IDE0TDE0IDZNLTItMmw4IDgiIHN0cm9rZT0iI2NiZDVlMSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9zdmc+')]" style={{ left: hatchStartPx, width: hatchStartWidth }}></div>
-
                       )}
 
                       {hatchEndWidth > 0 && (
-
                         <div className="absolute top-0 bottom-0 pointer-events-none opacity-50 z-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxwYXRoIGQ9Ik0tMiAxMGwxMi0xMk02IDE0TDE0IDZNLTItMmw4IDgiIHN0cm9rZT0iI2NiZDVlMSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9zdmc+')]" style={{ left: hatchEndPx, width: hatchEndWidth }}></div>
-
                       )}
 
                       {timeSlots.map(slot => (
-
                         <div
-
                           key={`${slot.hour}-${slot.minute}`}
-
                           className="flex-shrink-0 border-r border-slate-200/50 hover:bg-blue-50/50 transition-colors z-10"
-
                           style={{ width: slotWidthPx }}
-
                           onDrop={(e) => handleDrop(e, auditor.login, slot.hour + slot.minute / 60)}
-
                           onDragOver={handleDragOver}
-
                         ></div>
-
                       ))}
 
-                      {/* Render OS */}
-
+                      {/* Render OS com Encadeamento Sequencial Anti-Sobreposição e Tempos Reais */}
                       {(() => {
-
-                        const sortedAssignedOs = [...assignedOs].sort((a, b) => {
-
-                          const isStartedA = a.status === 'in_progress' || a.status === 'iniciada';
-
-                          const isCompletedA = a.status === 'completed' || a.status === 'concluido';
-
-                          const isSuspendedA = a.status === 'suspended' || a.status === 'suspensa';
-
-                          const startA = new Date((isStartedA || isCompletedA || isSuspendedA) && a.historico ? (a.historico.find(h => h.acao && h.acao.includes('INICIADA'))?.timestamp || a.planned_start) : a.planned_start).getTime();
-
-                          const isStartedB = b.status === 'in_progress' || b.status === 'iniciada';
-
-                          const isCompletedB = b.status === 'completed' || b.status === 'concluido';
-
-                          const isSuspendedB = b.status === 'suspended' || b.status === 'suspensa';
-
-                          const startB = new Date((isStartedB || isCompletedB || isSuspendedB) && b.historico ? (b.historico.find(h => h.acao && h.acao.includes('INICIADA'))?.timestamp || b.planned_start) : b.planned_start).getTime();
-
-                          return startA - startB;
-
+                        const scheduledList = assignedOs.filter(fa => !!fa.planned_start);
+                        const sortedAssignedOs = [...scheduledList].sort((a, b) => {
+                          const getEffStart = (x) => {
+                            const timeInfo = getOSTimesAndStatus(x, ordens, fieldAudits, workflows, inspecoes);
+                            const raw = ((timeInfo.status === 'in_progress' || timeInfo.status === 'completed' || timeInfo.status === 'suspended') && timeInfo.realStartStr) || x.planned_start;
+                            return new Date(raw || 0).getTime();
+                          };
+                          return getEffStart(a) - getEffStart(b);
                         });
 
                         let lastEndTime = 0;
 
-                        return sortedAssignedOs.map((fa, index) => {
+                        return sortedAssignedOs.map((fa) => {
+                          const timeInfo = getOSTimesAndStatus(fa, ordens, fieldAudits, workflows, inspecoes);
+                          const isStarted = timeInfo.status === 'in_progress';
+                          const isCompleted = timeInfo.status === 'completed';
+                          const isSuspended = timeInfo.status === 'suspended';
 
-                          if (!fa.planned_start) return null;
+                          const actualStart = (isStarted || isCompleted || isSuspended)
+                            ? (timeInfo.realStartStr || fa.planned_start)
+                            : fa.planned_start;
 
-                          const isStarted = fa.status === 'in_progress' || fa.status === 'iniciada';
+                          const payload = fa.payload_dados || {};
+                          let durationMins = timeInfo.plannedDurationMins;
 
-                          const isCompleted = fa.status === 'completed' || fa.status === 'concluido';
-
-                          const isSuspended = fa.status === 'suspended' || fa.status === 'suspensa';
-
-                          const actualStart = (isStarted || isCompleted || isSuspended) && fa.historico ? (fa.historico.find(h => h.acao && h.acao.includes('INICIADA'))?.timestamp || fa.planned_start) : fa.planned_start;
-
-                          // Duração dinâmica (mínimo de 1h10m = 70 min)
-
-                          let durationMins = 70;
-
-                          if (isStarted) {
-
-                            const startTime = new Date(actualStart).getTime();
-
-                            const elapsedMins = (Date.now() - startTime) / 60000;
-
-                            if (elapsedMins > 70) {
-
-                              durationMins = elapsedMins;
-
-                            }
-
-                          } else if (isCompleted) {
-
-                            const startTime = new Date(actualStart).getTime();
-
-                            const completedTimeLog = fa.historico?.find(h => h.acao && (h.acao.includes('COMPLETADA') || h.acao.includes('INSPECAO_CRIADA')))?.timestamp || fa.planned_start;
-
-                            const compTime = new Date(completedTimeLog).getTime();
-
-                            const diffMins = (compTime - startTime) / 60000;
-
-                            if (diffMins > 70) {
-
-                              durationMins = diffMins;
-
-                            }
-
-                          } else if (isSuspended) {
-
-                            const startTime = new Date(actualStart).getTime();
-
-                            const suspendedTimeLog = fa.end_time || fa.historico?.find(h => h.acao && h.acao.includes('SUSPENSA'))?.timestamp || fa.planned_start;
-
-                            const suspTime = new Date(suspendedTimeLog).getTime();
-
-                            const diffMins = (suspTime - startTime) / 60000;
-
-                            durationMins = Math.max(diffMins, 15); // pelo menos 15 minutos visíveis no Gantt
-
+                          if (isCompleted && timeInfo.executedDurationMins) {
+                            durationMins = timeInfo.executedDurationMins;
+                          } else if (isStarted && timeInfo.realStart) {
+                            const elapsedMins = Math.round((Date.now() - timeInfo.realStart.getTime()) / 60000);
+                            durationMins = Math.max(elapsedMins, timeInfo.plannedDurationMins);
+                          } else if (isSuspended && timeInfo.executedDurationMins) {
+                            durationMins = timeInfo.executedDurationMins;
                           }
-
-                          // Determinar horário de início visual com empurrão se necessário
 
                           let startMs = new Date(actualStart).getTime();
-
+                          // Encadeamento inteligente: evita que duas ordens no mesmo auditor se sobreponham visualmente
                           if (startMs < lastEndTime) {
-
                             startMs = lastEndTime;
-
                           }
 
-                          // Atualizar o término para a próxima OS ser empurrada
-
-                          lastEndTime = startMs + durationMins * 60000;
+                          lastEndTime = startMs + Math.max(durationMins, 15) * 60000;
 
                           const startIsoStr = new Date(startMs).toISOString();
-
                           const leftPx = calcLeftPx(startIsoStr);
-
-                          const wPx = durationMins * pxPerMin;
+                          const wPx = Math.max(durationMins * pxPerMin, 28);
 
                           const resolvedOsId = getOsId(fa) || 'OS Desconhecida';
-
                           const osData = ordens.find(o => o.nr_ordem === resolvedOsId);
+                          const prog = getProgress(startIsoStr, new Date(startMs + durationMins * 60000).toISOString());
 
-                          const prog = getProgress(fa.planned_start, new Date(new Date(fa.planned_start).getTime() + durationMins * 60000).toISOString());
+                          let cardBg = 'bg-sky-500 text-white shadow-sky-600/20';
+                          let icon = <Clock size={11} className="shrink-0 text-white/90" />;
+                          let badgeText = `${durationMins}m`;
 
-                          const baseColorClass = getColorClasses(fa.status, 'os');
+                          if (isCompleted) {
+                            cardBg = 'bg-blue-600 text-white shadow-blue-700/20';
+                            icon = <CheckCircle2 size={11} className="shrink-0 text-white" />;
+                            badgeText = timeInfo.executedDurationMins ? `${timeInfo.executedDurationMins}m` : `${durationMins}m`;
+                          } else if (isStarted) {
+                            cardBg = 'bg-emerald-600 text-white shadow-emerald-700/20 animate-pulse';
+                            icon = <Play size={11} className="shrink-0 text-white fill-white" />;
+                            badgeText = `${durationMins}m`;
+                          } else if (isSuspended) {
+                            cardBg = 'bg-amber-500 text-slate-900 shadow-amber-600/20';
+                            icon = <Pause size={11} className="shrink-0 text-slate-900 fill-slate-900" />;
+                            badgeText = `${durationMins}m`;
+                          }
 
                           return (
-
                             <div
-
                               key={`os-${fa.inspid}`}
-
                               draggable={!isStarted && !isCompleted && !isSuspended}
-
                               onDragStart={(e) => handleDragStart(e, fa)}
-
-                              className={`absolute top-1.5 bottom-1.5 rounded-lg shadow-sm border overflow-hidden cursor-pointer backdrop-blur-md transition-all z-20 group hover:shadow-md hover:scale-[1.01] hover:z-30`}
-
-                              style={{ left: `${leftPx}px`, width: `${wPx}px`, borderColor: 'rgba(0,0,0,0.1)' }}
-
-                              title={`OS: ${resolvedOsId}`}
-
+                              className={`absolute top-1 bottom-1 rounded-xl shadow-md border border-white/20 overflow-hidden cursor-pointer backdrop-blur-md transition-all z-20 group hover:shadow-lg hover:scale-[1.02] hover:z-30 flex items-center px-2 select-none ${cardBg}`}
+                              style={{ left: `${leftPx}px`, width: `${wPx}px` }}
+                              title={`OS: ${resolvedOsId} • Duração: ${durationMins} min • Status: ${timeInfo.status === 'completed' ? 'Concluída' : (timeInfo.status === 'in_progress' ? 'Em Andamento' : (timeInfo.status === 'suspended' ? 'Suspensa' : 'Pendente'))}${timeInfo.realStart ? ' • Início: ' + timeInfo.realStart.toLocaleTimeString('pt-BR') : ''}${timeInfo.realEnd ? ' • Conclusão: ' + timeInfo.realEnd.toLocaleTimeString('pt-BR') : ''}`}
                               onClick={(e) => {
-
-                                // Open mini modal instead of details!
-
                                 const rect = e.currentTarget.getBoundingClientRect();
-
-                                setGanttActionItem({ type: 'os', item: fa, osData, rect, label: resolvedOsId, address: osData?.endereco_completo || 'Sem Endereço', base: osData?.base_contrato });
-
+                                setGanttActionItem({ 
+                                  type: 'os', 
+                                  item: fa, 
+                                  osData, 
+                                  rect, 
+                                  label: resolvedOsId, 
+                                  address: osData?.endereco_completo || payload.endereco_completo || 'Sem Endereço', 
+                                  base: osData?.base_contrato || payload.base_contrato,
+                                  timeInfo
+                                });
                               }}
-
                             >
+                              {(isStarted || isCompleted) && (
+                                <div 
+                                  className="absolute top-0 bottom-0 left-0 bg-black/15 pointer-events-none transition-all duration-1000"
+                                  style={{ width: `${isCompleted ? 100 : prog}%` }}
+                                />
+                              )}
 
-                              <div className={`absolute inset-0 ${baseColorClass} opacity-30`}></div>
+                              <div className="relative z-10 flex items-center justify-between w-full min-w-0 gap-1">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  {icon}
+                                  <span className="text-[10px] font-black tracking-tight truncate leading-none">
+                                    {resolvedOsId}
+                                  </span>
+                                </div>
 
-                              <div className={`absolute top-0 bottom-0 left-0 transition-all duration-1000 ${baseColorClass}`} style={{ width: `${isStarted || isCompleted ? prog : 0}%` }}></div>
-
-                              <div className="absolute inset-0 p-1.5 flex flex-col justify-center">
-
-                                <div className={`text-[10px] font-black uppercase tracking-wider mb-0.5 truncate drop-shadow leading-none ${isSuspended ? 'text-amber-900' : 'text-white'}`}>{resolvedOsId}</div>
-
+                                {wPx > 60 && (
+                                  <span className="text-[8px] font-mono font-black uppercase px-1.5 py-0.5 rounded-md bg-black/20 text-white/95 shrink-0">
+                                    {badgeText}
+                                  </span>
+                                )}
                               </div>
-
                             </div>
-
                           );
-
                         });
-
                       })()}
 
-                      {/* Render Custom Activities */}
-
-                      {assignedExtras.map((at, i) => {
-
+                      {/* Render Atividades Extras */}
+                      {assignedExtras.map((at) => {
                         if (!at.planned_start || !at.planned_end) return null;
 
                         const isStarted = at.status === 'in_progress' || at.status === 'iniciada';
-
                         const isCompleted = at.status === 'completed' || at.status === 'concluido';
 
-                        const actualStart = (isStarted || isCompleted) ? at.planned_start /* extras don't have historico yet, we can use start_time if added */ : at.planned_start;
-
+                        const actualStart = at.planned_start;
                         const leftPx = calcLeftPx(actualStart);
-
-                        const wPx = calcWidthPx(actualStart, at.planned_end, 60);
+                        const durMins = Math.max(15, Math.round((new Date(at.planned_end) - new Date(at.planned_start)) / 60000));
+                        const wPx = Math.max(durMins * pxPerMin, 24);
 
                         const prog = getProgress(at.planned_start, at.planned_end);
 
-                        const baseColorClass = getColorClasses(at.status, 'extra');
-
                         return (
-
                           <div
-
                             key={`at-${at.id}`}
-
-                            className={`absolute top-1.5 bottom-1.5 rounded-lg shadow-sm border border-black/10 overflow-hidden cursor-pointer backdrop-blur-md transition-all z-20 hover:shadow-md hover:z-30`}
-
+                            className="absolute top-1 bottom-1 rounded-xl shadow-md border border-purple-300/40 bg-purple-600 text-white overflow-hidden cursor-pointer backdrop-blur-md transition-all z-20 hover:shadow-lg hover:scale-[1.02] hover:z-30 flex items-center px-2 select-none"
                             style={{ left: `${leftPx}px`, width: `${wPx}px` }}
-
+                            title={`${at.tipo_atividade}: ${at.comentario || 'Atividade Extra'} (${durMins} min)`}
                             onClick={(e) => {
-
                               const rect = e.currentTarget.getBoundingClientRect();
-
-                              setGanttActionItem({ type: 'extra', item: at, rect, label: at.tipo_atividade, address: at.comentario, base: '' });
-
+                              setGanttActionItem({ 
+                                type: 'extra', 
+                                item: at, 
+                                rect, 
+                                label: at.tipo_atividade, 
+                                address: at.comentario || 'Atividade Extra', 
+                                base: '' 
+                              });
                             }}
-
                           >
+                            {(isStarted || isCompleted) && (
+                              <div 
+                                className="absolute top-0 bottom-0 left-0 bg-black/20 pointer-events-none transition-all duration-1000"
+                                style={{ width: `${isCompleted ? 100 : prog}%` }}
+                              />
+                            )}
 
-                            <div className={`absolute inset-0 ${baseColorClass} ${at.status === 'pending' ? 'opacity-80' : 'opacity-30'}`}></div>
-
-                            <div className={`absolute top-0 bottom-0 left-0 transition-all duration-1000 ${at.status === 'pending' ? 'bg-purple-400' : baseColorClass}`} style={{ width: `${isStarted || isCompleted ? prog : 0}%` }}></div>
-
-                            <div className="absolute inset-0 p-1.5 flex flex-col justify-center">
-
-                              <div className={`text-[10px] font-black uppercase tracking-wider mb-0.5 truncate drop-shadow ${at.status === 'pending' ? 'text-purple-900' : 'text-white'} leading-none flex items-center gap-1`}>
-
-                                <AlertTriangle size={10} /> {at.tipo_atividade}
-
+                            <div className="relative z-10 flex items-center justify-between w-full min-w-0 gap-1">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <AlertTriangle size={11} className="shrink-0 text-purple-200" />
+                                <span className="text-[10px] font-black uppercase tracking-tight truncate leading-none">
+                                  {at.tipo_atividade}
+                                </span>
                               </div>
 
-                              {at.comentario && <div className={`text-[8px] leading-tight truncate ${at.status === 'pending' ? 'text-purple-800' : 'text-white/90'}`}>{at.comentario}</div>}
-
+                              {wPx > 60 && (
+                                <span className="text-[8px] font-mono font-black uppercase px-1.5 py-0.5 rounded-md bg-black/25 text-white/95 shrink-0">
+                                  {durMins}m
+                                </span>
+                              )}
                             </div>
-
                           </div>
-
                         );
-
                       })}
-
                     </div>
-
                   </div>
-
                 );
-
               })}
-
             </div>
-
           </div>
-
         )}
-
       </div>
 
       {/* ── MODAL DE DETALHES DO ATENDIMENTO COM ALOCAÇÃO ── */}
-
       {editingTask && (
         <ModalEditarOS
           os={editingTask}
@@ -3379,361 +3057,424 @@ export default function WFMScreen({
           }}
         />
       )}
-      {selectedSearchOS && (
-
+      {!onViewDetails && selectedSearchOS && (
         <ModalDetalhesOS
-
           os={selectedSearchOS}
-
           onClose={() => setSelectedSearchOS(null)}
-
           ordens={ordens}
-
           inspecoes={inspecoes}
-
           workflows={workflows}
-
           fieldAudits={fieldAudits}
-
           auditors={escalas.length === 0 ? auditors : auditors.filter(a => escalas.some(e => e.auditor === a.login || e.auditor === a.email || e.auditor === a.nome))}
-
           onAssignAudit={onAssignAudit}
-
         />
-
       )}
 
-
+      {statusAuditorModal && (
+        <ModalStatusAuditor
+          auditor={statusAuditorModal}
+          initialDate={selectedDate}
+          onClose={() => setStatusAuditorModal(null)}
+          currentUser={currentUser}
+        />
+      )}
 
       {showNewTaskModal && (
-
         <NovaAtividadeAvulsaModal
-
           onClose={() => setShowNewTaskModal(false)}
-
+          onToast={addToast}
           onSave={async (task) => {
-
             const hist = [{ timestamp: new Date().toISOString(), usuario: 'WFM_Operador', acao: 'CRIADO_AVULSA', observacao: 'Atividade avulsa criada no painel' }];
-
             const wfmTask = { ...task, historico: hist };
-
-            const { supabase } = await import('../supabaseClient');
-
-            await supabase.from('wfm_tarefas').insert([wfmTask]);
-
-            setShowNewTaskModal(false);
-
+            const { error } = await supabase.from('wfm_tarefas').insert([wfmTask]);
+            if (error) {
+              addToast('Erro ao criar tarefa avulsa: ' + error.message, 'error');
+            } else {
+              addToast('Nova atividade criada com sucesso!', 'success');
+              setShowNewTaskModal(false);
+            }
           }}
-
         />
-
       )}
 
       {showActivityModal && (
-
         <ActivityModal
-
           auditorLogin={showActivityModal}
-
           dateStr={dateStr}
-
           onClose={() => setShowActivityModal(null)}
-
           onSave={async (data) => {
-
             await supabase.from('autofiscalizacao_atividades_extras').insert([data]);
-
             if (onRefreshAtividades) onRefreshAtividades();
-
+            addToast('Atividade extra salva com sucesso!', 'success');
             setShowActivityModal(null);
-
           }}
-
         />
-
       )}
 
       {showConfig && (
-
         <ConfigModal
-
           auditorLogin={showConfig}
-
           pref={prefs.find(p => p.auditor === showConfig) || { auditor: showConfig }}
-
           escalas={escalas}
-
           dateStr={dateStr}
-
           onClose={() => setShowConfig(null)}
-
           onSave={async (data, isCalendarEnabled) => {
-
             await supabase.from('autofiscalizacao_auditor_prefs').upsert(data);
-
             if (isCalendarEnabled) {
-
               await supabase.from('wfm_calendario_escalas').upsert({
-
                 auditor: showConfig,
-
                 date: dateStr,
-
                 shift_start: data.shift_start,
-
                 shift_end: data.shift_end,
-
                 created_by: currentUser?.nome || currentUser?.login || 'Sistema'
-
               }, { onConflict: 'auditor,date' });
-
             } else {
-
               await supabase.from('wfm_calendario_escalas').delete().eq('auditor', showConfig).eq('date', dateStr);
-
             }
-
             fetchPrefs();
-
             if (onRefreshEscalas) onRefreshEscalas();
-
+            addToast('Configurações do auditor atualizadas com sucesso!', 'success');
             setShowConfig(null);
-
           }}
-
         />
-
       )}
 
       {historyAuditor && (
-
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-
           <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 flex flex-col max-h-[85vh]">
-
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-
               <div className="flex items-center gap-3">
-
                 <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
-
                   <Clock size={20} />
-
                 </div>
-
                 <div>
-
                   <h3 className="font-black text-slate-800 text-base">Histórico de Ações do Auditor</h3>
-
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-0.5">{historyAuditor}</p>
-
                 </div>
-
               </div>
-
               <button
-
                 onClick={() => setHistoryAuditor(null)}
-
                 className="p-2 hover:bg-slate-200 rounded-xl transition-colors text-slate-400 hover:text-slate-600"
-
               >
-
                 <X size={18} />
-
               </button>
-
             </div>
-
             <div className="flex-1 p-6 overflow-y-auto space-y-4">
-
               {getAuditorHistory(historyAuditor).length === 0 ? (
-
                 <div className="text-center py-8 text-slate-400 font-bold text-sm">
-
                   Nenhuma ação registrada para este auditor hoje.
-
                 </div>
-
               ) : (
-
                 <div className="relative border-l border-slate-200 pl-4 ml-2 space-y-5">
-
                   {getAuditorHistory(historyAuditor).map((item, idx) => (
-
                     <div key={idx} className="relative">
-
                       <span className="absolute -left-[21px] top-1.5 w-2.5 h-2.5 rounded-full bg-blue-500 border border-white ring-4 ring-blue-50"></span>
-
                       <div className="text-[10px] text-slate-400 font-black uppercase tracking-wider">
-
                         {new Date(item.timestamp).toLocaleTimeString('pt-BR')}
-
                       </div>
-
                       <div className="text-xs font-bold text-slate-800 mt-0.5 uppercase tracking-wide">
-
                         {item.acao.replace(/_/g, ' ')}
-
                       </div>
-
                       <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-
                         {item.observacao}
-
                       </p>
-
                       <div className="text-[9px] text-slate-400 mt-1 font-medium">
-
                         Por: {item.usuario}
-
                       </div>
-
                     </div>
-
                   ))}
-
                 </div>
-
               )}
-
             </div>
-
             <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
-
               <button
-
                 onClick={() => setHistoryAuditor(null)}
-
                 className="px-5 py-2.5 text-xs font-black uppercase tracking-wider text-slate-600 hover:text-slate-800 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-all"
-
               >
-
                 Fechar
-
               </button>
-
             </div>
-
           </div>
-
         </div>
-
       )}
 
       {ganttActionItem && (
-
         <ActionPopover
-
           data={ganttActionItem}
-
+          ordens={ordens}
+          fieldAudits={fieldAudits}
+          workflows={workflows}
+          inspecoes={inspecoes}
           onClose={() => setGanttActionItem(null)}
-
           onAction={(action) => handleAction(action, ganttActionItem.item, ganttActionItem.type)}
-
           onViewDetails={() => {
-
-            if (ganttActionItem.type === 'os' && onViewDetails && ganttActionItem.osData) {
-
-              onViewDetails(ganttActionItem.osData);
-
+            if (ganttActionItem.type === 'os') {
+              const osToOpen = ganttActionItem.osData || ganttActionItem.item.os_data || ganttActionItem.item;
+              handleOpenOSDetails(osToOpen);
             }
-
             setGanttActionItem(null);
-
           }}
-
         />
-
       )}
 
+      {/* ── ULTRA-PREMIUM NATIVE WFM TOAST NOTIFICATIONS ── */}
+      <WFMToastList toasts={toasts} onDismiss={removeToast} />
+
+      {/* ── ULTRA-PREMIUM NATIVE WFM CONFIRMATION DIALOG ── */}
+      {confirmModal && <WFMConfirmModal {...confirmModal} />}
     </div>
 
   );
 
 }
 
-function ActionPopover({ data, onClose, onAction, onViewDetails }) {
-  const { item, type, rect, label, address, base } = data;
+function ActionPopover({ data, onClose, onAction, onViewDetails, ordens = [], fieldAudits = [], workflows = [], inspecoes = [] }) {
+  const { item, type, label, address, base, osData, timeInfo: propTimeInfo } = data;
+  const [copied, setCopied] = useState(false);
   
-  const status = (item.status || 'pendente').toLowerCase();
-  const isStarted = status === 'iniciada' || status === 'in_progress';
-  const isSuspended = status === 'suspensa' || status === 'suspended';
-  const isCompleted = status === 'concluido' || status === 'completed' || status === 'concluida';
+  const timeInfo = useMemo(() => {
+    if (propTimeInfo && propTimeInfo.osId) return propTimeInfo;
+    if (type !== 'os') return {};
+    return getOSTimesAndStatus(item, ordens, fieldAudits, workflows, inspecoes);
+  }, [item, type, propTimeInfo, ordens, fieldAudits, workflows, inspecoes]);
+
+  const status = (type === 'os' ? (timeInfo.status || item.status || 'pending') : (item.status || 'pending')).toLowerCase();
+  const isStarted = status === 'in_progress' || status === 'iniciada' || status === 'iniciado';
+  const isSuspended = status === 'suspended' || status === 'suspensa' || status === 'suspenso';
+  const isCompleted = status === 'completed' || status === 'concluido' || status === 'concluida';
   
-  const formatStatus = (s) => {
+  const formatStatus = () => {
      if (isCompleted) return 'Concluída';
      if (isSuspended) return 'Suspensa';
-     if (isStarted) return 'Iniciada';
+     if (isStarted) return 'Em Andamento';
+     if (item.auditor) return 'Programada';
      return 'Despachada / Pendente';
   };
   
-  const statusColor = isCompleted ? 'text-blue-600 bg-blue-50' : (isSuspended ? 'text-amber-600 bg-amber-50' : (isStarted ? 'text-emerald-600 bg-emerald-50' : 'text-slate-600 bg-slate-50'));
+  const statusColor = isCompleted 
+    ? 'text-blue-700 bg-blue-50 border-blue-200' 
+    : (isSuspended 
+      ? 'text-amber-700 bg-amber-50 border-amber-200' 
+      : (isStarted 
+        ? 'text-emerald-700 bg-emerald-50 border-emerald-200 animate-pulse' 
+        : 'text-slate-700 bg-slate-100 border-slate-200'));
 
-  const payload = item.payload_dados || {};
-  const enderecoFull = payload.endereco_completo || payload.endereco_cliente || payload.endereco || address;
-  const tStart = payload.fisc_started_at;
-  const tEnd = payload.fisc_finished_at;
+  const payload = item.payload_dados || item.os_data || {};
+  const osInfo = osData || timeInfo.matchedOrdem || {};
+  const rawAddress = osInfo.endereco_completo || osInfo.endereco_cliente || payload.endereco_completo || payload.endereco_cliente || payload.endereco || address || '';
+  
+  let cleanAddressText = rawAddress;
+  let latFromUrl = null;
+  let lngFromUrl = null;
+
+  if (typeof cleanAddressText === 'string' && (cleanAddressText.startsWith('http://') || cleanAddressText.startsWith('https://'))) {
+    const coordsMatch = cleanAddressText.match(/([-+]?\d+\.\d+)[\s,+]+([-+]?\d+\.\d+)/g);
+    if (coordsMatch && coordsMatch.length > 0) {
+      const lastCoord = coordsMatch[coordsMatch.length - 1].replace(/\+/g, ' ').trim().split(/\s+/);
+      if (lastCoord.length === 2) {
+        latFromUrl = parseFloat(lastCoord[0]);
+        lngFromUrl = parseFloat(lastCoord[1]);
+      }
+    }
+    const bairroMunicipio = [osInfo.bairro || payload.bairro, osInfo.municipio || osInfo.cidade || payload.municipio].filter(Boolean).join(', ');
+    cleanAddressText = bairroMunicipio || 'Localização Georreferenciada da OS';
+  }
+
+  const baseOp = osInfo.base_contrato || osInfo.base || payload.base_contrato || payload.base || base || '-';
+  const equipeCodigo = osInfo.equipe || payload.equipe || item.equipe || '-';
+  const classeOS = osInfo.classe || payload.classe || item.classe || '-';
+  const causaOS = osInfo.descricao_causa || osInfo.causa || payload.descricao_causa || payload.causa || item.causa || '-';
+
+  const plannedStart = timeInfo.plannedStart || (item.planned_start ? new Date(item.planned_start) : null);
+  const plannedEnd = timeInfo.plannedEnd || (item.planned_end ? new Date(item.planned_end) : null);
+  const plannedDurationMins = timeInfo.plannedDurationMins || ((plannedStart && plannedEnd) ? Math.round((plannedEnd - plannedStart) / 60000) : (item.minutos || item.duracao || payload.duracao || 60));
+
+  const realStart = timeInfo.realStart;
+  const realEnd = timeInfo.realEnd;
+  const executedDurationMins = timeInfo.executedDurationMins;
+
+  const finalLat = osInfo.latitude || payload.latitude || item.latitude || latFromUrl;
+  const finalLng = osInfo.longitude || payload.longitude || item.longitude || lngFromUrl;
+
+  const mapsUrl = (finalLat && finalLng)
+    ? `https://www.google.com/maps/dir/?api=1&destination=${finalLat},${finalLng}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanAddressText)}`;
+
+  const wazeUrl = (finalLat && finalLng)
+    ? `https://waze.com/ul?ll=${finalLat},${finalLng}&navigate=yes`
+    : `https://waze.com/ul?q=${encodeURIComponent(cleanAddressText)}&navigate=yes`;
+
+  const handleCopyAddress = () => {
+    if (cleanAddressText) {
+      navigator.clipboard.writeText(cleanAddressText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl overflow-hidden w-full max-w-sm border border-slate-100 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-        <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-start">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs" onClick={onClose}>
+      <div className="bg-white rounded-3xl shadow-2xl overflow-hidden w-full max-w-md border border-slate-100 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="p-4 bg-slate-900 text-white flex justify-between items-start">
           <div>
-            <h3 className="font-black text-slate-800 flex items-center gap-2">
-              {type === 'os' ? <FileText size={16} className="text-blue-600" /> : <AlertTriangle size={16} className="text-purple-600" />}
-              {label}
-            </h3>
-            <span className={`mt-2 inline-flex items-center px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border border-current/10 ${statusColor}`}>
-              {formatStatus(status)}
-            </span>
+            <div className="flex items-center gap-2">
+              {type === 'os' ? <FileText size={18} className="text-blue-400" /> : <AlertTriangle size={18} className="text-purple-400" />}
+              <h3 className="font-black text-base tracking-wide text-white">{label}</h3>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${statusColor}`}>
+                {formatStatus()}
+              </span>
+              <span className="text-[11px] text-slate-300 font-bold">
+                {type === 'os' ? (item.categoria || 'Fiscalização de OS') : item.tipo_atividade}
+              </span>
+            </div>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-lg"><X size={16} className="text-slate-500" /></button>
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors">
+            <X size={18} />
+          </button>
         </div>
-        <div className="p-4 space-y-3">
-          
-          <div className="text-xs font-bold text-slate-600 flex items-start gap-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
-             <MapPin size={14} className="text-slate-400 shrink-0 mt-0.5" />
-             <span className="line-clamp-2">{enderecoFull || 'Sem Endereço'}</span>
+
+        {/* Content Body */}
+        <div className="p-5 space-y-3.5 max-h-[75vh] overflow-y-auto">
+          {/* Equipe, Base & Duração */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/70 text-center">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Equipe</span>
+              <span className="text-xs font-black text-slate-800 truncate block mt-0.5">{equipeCodigo}</span>
+            </div>
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/70 text-center">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Base</span>
+              <span className="text-xs font-black text-slate-800 truncate block mt-0.5">{baseOp}</span>
+            </div>
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/70 text-center">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Duração</span>
+              <span className="text-xs font-black text-blue-600 truncate block mt-0.5">
+                {executedDurationMins ? `${executedDurationMins} min` : `${plannedDurationMins} min`}
+              </span>
+            </div>
           </div>
 
-          {base && (
-            <div className="text-xs font-bold text-slate-600 flex items-center gap-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
-              <Route size={14} className="text-slate-400" /> Base: {base}
+          {/* Esteira de 3 Tempos */}
+          <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/70 space-y-2">
+            <div className="text-[10px] font-black uppercase tracking-wider text-slate-500">Linha de Tempo da OS</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
+                <div className="flex items-center gap-1 text-[9px] font-black uppercase text-slate-500">
+                  <Clock size={11} className="text-blue-500 shrink-0" /> Programado
+                </div>
+                <div className="mt-1.5">
+                  <span className="text-[11px] font-mono font-bold text-slate-800 block leading-tight">
+                    {plannedStart ? plannedStart.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                  </span>
+                  <span className="text-[9px] font-mono text-slate-400 block leading-tight">
+                    até {plannedEnd ? plannedEnd.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                  </span>
+                </div>
+                <span className="text-[8px] font-bold text-slate-400 mt-1 block">{plannedDurationMins}m prev.</span>
+              </div>
+              <div className={`p-2.5 rounded-xl border shadow-2xs flex flex-col justify-between ${realStart ? 'bg-emerald-50/70 border-emerald-200' : 'bg-white border-slate-200/80'}`}>
+                <div className="flex items-center gap-1 text-[9px] font-black uppercase text-emerald-700">
+                  <Play size={11} className="text-emerald-500 fill-emerald-500 shrink-0" /> Início Real
+                </div>
+                <div className="mt-1.5">
+                  <span className={`text-[11px] font-mono font-bold block leading-tight ${realStart ? 'text-emerald-800' : 'text-slate-400'}`}>
+                    {realStart ? realStart.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Não iniciado'}
+                  </span>
+                </div>
+                <span className="text-[8px] font-bold text-slate-400 mt-1 block">
+                  {realStart ? (realStart.toLocaleDateString('pt-BR') !== (plannedStart ? plannedStart.toLocaleDateString('pt-BR') : '') ? realStart.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : 'Iniciado') : 'Aguardando'}
+                </span>
+              </div>
+              <div className={`p-2.5 rounded-xl border shadow-2xs flex flex-col justify-between ${realEnd ? 'bg-blue-50/70 border-blue-200' : (isStarted ? 'bg-amber-50/70 border-amber-200' : 'bg-white border-slate-200/80')}`}>
+                <div className="flex items-center gap-1 text-[9px] font-black uppercase text-blue-700">
+                  <CheckCircle2 size={11} className="text-blue-500 shrink-0" /> Conclusão
+                </div>
+                <div className="mt-1.5">
+                  <span className={`text-[11px] font-mono font-bold block leading-tight ${realEnd ? 'text-blue-800' : (isStarted ? 'text-amber-700 font-bold text-[10px]' : 'text-slate-400')}`}>
+                    {realEnd ? realEnd.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : (isStarted ? 'Em andamento' : (isSuspended ? 'Suspensa' : 'Pendente'))}
+                  </span>
+                </div>
+                <span className="text-[8px] font-bold text-slate-400 mt-1 block">
+                  {executedDurationMins ? `${executedDurationMins}m real` : '--'}
+                </span>
+              </div>
             </div>
-          )}
-          <div className="text-xs font-bold text-slate-600 flex items-center gap-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
-            <Clock size={14} className="text-slate-400" /> Turno Programado: {new Date(item.planned_start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           </div>
-          
-          {(tStart || tEnd) && (
-            <div className="text-xs font-bold text-slate-600 flex flex-col gap-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
-              {tStart && <div className="flex items-center gap-1"><Play size={12} className="text-emerald-500" /> Início: {new Date(tStart).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>}
-              {tEnd && <div className="flex items-center gap-1"><CheckCircle2 size={12} className="text-blue-500" /> Fim: {new Date(tEnd).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>}
-            </div>
-          )}
 
-          <div className="flex flex-col gap-2 pt-2">
+          {/* Endereço & Navegação */}
+          <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/70 space-y-2.5">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2 text-xs min-w-0">
+                <MapPin size={15} className="text-rose-500 shrink-0 mt-0.5" />
+                <span className="font-semibold text-slate-700 leading-snug break-words">
+                  {cleanAddressText || 'Sem Endereço Registrado'}
+                </span>
+              </div>
+              <button 
+                onClick={handleCopyAddress}
+                title="Copiar Endereço"
+                className="p-1 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-slate-800 shrink-0 hover:bg-slate-100 transition-colors"
+              >
+                {copied ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60">
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2 px-3 bg-white hover:bg-blue-50 text-blue-700 font-black text-xs rounded-xl border border-blue-200 text-center flex items-center justify-center gap-1.5 shadow-2xs transition-all active:scale-98"
+              >
+                <MapIcon size={14} className="text-blue-600" /> Google Maps
+              </a>
+              <a
+                href={wazeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2 px-3 bg-white hover:bg-cyan-50 text-cyan-800 font-black text-xs rounded-xl border border-cyan-200 text-center flex items-center justify-center gap-1.5 shadow-2xs transition-all active:scale-98"
+              >
+                <Navigation size={14} className="text-cyan-600" /> Waze
+              </a>
+            </div>
+          </div>
+
+          {/* Ações */}
+          <div className="space-y-2 pt-1">
             {!isStarted && !isCompleted && !isSuspended && (
-              <button onClick={() => onAction('iniciar')} className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl transition-colors shadow-sm">
-                <Play size={14} /> Iniciar Atividade
+              <button 
+                onClick={() => onAction('iniciar')} 
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-500/20 active:scale-98"
+              >
+                <Play size={15} /> Iniciar Atividade Agora
               </button>
             )}
             {isStarted && !isCompleted && !isSuspended && (
-              <button onClick={() => onAction('suspender')} className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-xl transition-colors shadow-sm">
-                <Pause size={14} /> Suspender Atividade
+              <button 
+                onClick={() => onAction('suspender')} 
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-amber-500/20 active:scale-98"
+              >
+                <Pause size={15} /> Suspender Atividade
               </button>
             )}
             
             {!isStarted && !isCompleted && !isSuspended && (
-              <button onClick={() => onAction('desprogramar')} className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-600 font-black text-xs rounded-xl transition-colors">
+              <button 
+                onClick={() => onAction('desprogramar')} 
+                className="w-full flex items-center justify-center gap-2 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 font-bold text-xs rounded-xl transition-colors"
+              >
                 <Trash2 size={14} /> Desprogramar do Gantt
               </button>
             )}
 
             {type === 'os' && (
-              <button onClick={onViewDetails} className="w-full mt-2 flex items-center justify-center gap-2 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[10px] rounded-lg transition-colors border border-blue-200">
-                Ver Todos os Detalhes da OS
+              <button 
+                onClick={onViewDetails} 
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-blue-500/20 active:scale-98 cursor-pointer"
+              >
+                <Eye size={14} /> Ver Todos os Detalhes da OS
               </button>
             )}
           </div>
@@ -3744,184 +3485,93 @@ function ActionPopover({ data, onClose, onAction, onViewDetails }) {
 }
 
 function ActivityModal({ auditorLogin, dateStr, onClose, onSave }) {
-
   const [tipo, setTipo] = useState('Refeição');
-
   const [start, setStart] = useState('12:00');
-
   const [end, setEnd] = useState('13:00');
-
   const [comentario, setComentario] = useState('');
 
-  const handleSave = async () => {
-    let lat = null;
-    let lng = null;
-
-    const rawEnd = (categoria === 'Fiscalização de OS' ? `${rua || ''} ${numero || ''}, ${bairro || ''}, ${cidade || ''} - ${estado || ''}` : enderecoOutros || enderecoClienteAF || '');
-    const cleanSearchAddress = rawEnd.replace(/Apt\/Comp:\s*[^-\n,]+/gi, '').replace(/\s+/g, ' ').trim();
-
-    if (cleanSearchAddress.length > 5) {
-      try {
-        const geoUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanSearchAddress + ', Brazil')}`;
-        const geoRes = await fetch(geoUrl, { headers: { 'User-Agent': 'FleetOperacaoApp/1.0' } });
-        if (geoRes.ok) {
-          const geoData = await geoRes.json();
-          if (Array.isArray(geoData) && geoData.length > 0) {
-            lat = parseFloat(geoData[0].lat);
-            lng = parseFloat(geoData[0].lon);
-          }
-        }
-      } catch (e) {
-        console.warn('[WFM] Geocoding error:', e);
-      }
-    }
-
+  const handleSave = () => {
     const s = new Date(`${dateStr}T${start}:00-03:00`);
-
     const e = new Date(`${dateStr}T${end}:00-03:00`);
 
     onSave({
-
       auditor: auditorLogin,
-
       tipo_atividade: tipo,
-
       data: dateStr,
-
       planned_start: s.toISOString(),
-
       planned_end: e.toISOString(),
-
       status: 'pending',
-
       comentario
-
     });
-
   };
 
   return (
-
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-
       <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
-
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-
           <h3 className="font-black text-slate-800">Nova Atividade Extra</h3>
-
           <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-lg"><X size={16} /></button>
-
         </div>
 
         <div className="p-4 space-y-4">
-
           <div>
-
             <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Tipo de Atividade</label>
-
             <select value={tipo} onChange={e => setTipo(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg font-medium text-slate-700">
-
               <option>Refeição</option>
-
               <option>Frota</option>
-
               <option>Almoxarifado</option>
-
               <option>Atividade Interna</option>
-
               <option>Atividade Externa</option>
-
             </select>
-
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-
             <div>
-
               <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Início</label>
-
               <input type="time" value={start} onChange={e => setStart(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg font-medium text-slate-700" />
-
             </div>
-
             <div>
-
               <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Fim</label>
-
               <input type="time" value={end} onChange={e => setEnd(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg font-medium text-slate-700" />
-
             </div>
-
           </div>
 
           <div>
-
             <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Comentário</label>
-
             <input type="text" value={comentario} onChange={e => setComentario(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg font-medium text-slate-700" placeholder="Motivo ou descrição..." />
-
           </div>
-
         </div>
 
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
-
           <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-700">Cancelar</button>
-
           <button onClick={handleSave} className="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg shadow-sm hover:bg-emerald-700">Salvar Atividade</button>
-
         </div>
-
       </div>
-
     </div>
-
   );
-
 }
 
 function ConfigModal({ auditorLogin, pref, escalas = [], dateStr, onClose, onSave }) {
-
   const existingScale = escalas.find(e => e.auditor === auditorLogin);
-
   const [isEnabled, setIsEnabled] = useState(!!existingScale);
-
   const [start, setStart] = useState(existingScale?.shift_start || pref.shift_start || '07:00');
-
   const [end, setEnd] = useState(existingScale?.shift_end || pref.shift_end || '18:00');
-
   const [startAddress, setStartAddress] = useState(pref.start_address || '');
-
   const [startLat, setStartLat] = useState(pref.start_lat || '');
-
   const [startLng, setStartLng] = useState(pref.start_lng || '');
 
   const handleSave = () => {
-
     onSave(
-
       {
-
         ...pref,
-
         shift_start: start,
-
         shift_end: end,
-
         start_address: startAddress,
-
         start_lat: parseFloat(startLat) || null,
-
         start_lng: parseFloat(startLng) || null
-
       },
-
       isEnabled
-
     );
-
   };
 
   const formattedDate = dateStr ? dateStr.split('-').reverse().join('/') : '';
@@ -4284,7 +3934,7 @@ function Calendar3MonthsModal({ currentDate, onSelect, onClose }) {
 
 }
 
-function NovaAtividadeAvulsaModal({ onClose, onSave }) {
+function NovaAtividadeAvulsaModal({ onClose, onSave, onToast }) {
 
   const [categoria, setCategoria] = useState('Fiscalização de OS');
 
@@ -4372,7 +4022,7 @@ function NovaAtividadeAvulsaModal({ onClose, onSave }) {
 
     if (cleanCep.length !== 8) {
 
-      alert("CEP inválido. Digite 8 números.");
+      if (onToast) onToast("CEP inválido. Digite 8 números.", "warning", "CEP Inválido");
 
       return;
 
@@ -4386,7 +4036,7 @@ function NovaAtividadeAvulsaModal({ onClose, onSave }) {
 
       if (data.erro) {
 
-        alert("CEP não encontrado.");
+        if (onToast) onToast("CEP não encontrado.", "warning", "CEP Não Encontrado");
 
         return;
 
@@ -4404,7 +4054,7 @@ function NovaAtividadeAvulsaModal({ onClose, onSave }) {
 
       console.error(e);
 
-      alert("Erro ao buscar CEP.");
+      if (onToast) onToast("Erro ao buscar CEP.", "error");
 
     }
 
@@ -4448,7 +4098,7 @@ function NovaAtividadeAvulsaModal({ onClose, onSave }) {
 
       if (!nrOrdem || !equipe) {
 
-        alert("Preencha o Número da OS e Equipe.");
+        if (onToast) onToast("Preencha o Número da OS e Equipe.", "warning", "Campos Obrigatórios");
 
         return;
 
@@ -4512,7 +4162,7 @@ function NovaAtividadeAvulsaModal({ onClose, onSave }) {
 
       if (!equipe) {
 
-        alert("Preencha a Equipe.");
+        if (onToast) onToast("Preencha a Equipe.", "warning", "Campo Obrigatório");
 
         return;
 
@@ -4544,7 +4194,7 @@ function NovaAtividadeAvulsaModal({ onClose, onSave }) {
 
       if (!nrOrdem || !equipe) {
 
-        alert("Preencha o Número da OS e Equipe.");
+        if (onToast) onToast("Preencha o Número da OS e Equipe.", "warning", "Campos Obrigatórios");
 
         return;
 
@@ -4601,11 +4251,8 @@ function NovaAtividadeAvulsaModal({ onClose, onSave }) {
       // Outros
 
       if (!tituloOutros || !enderecoOutros) {
-
-        alert("Preencha o Título e o Endereço.");
-
+        if (onToast) onToast("Preencha o Título e o Endereço.", "warning", "Campos Obrigatórios");
         return;
-
       }
 
       payload = {

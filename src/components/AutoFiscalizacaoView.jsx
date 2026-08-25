@@ -9,6 +9,8 @@ import { supabase } from '../supabaseClient';
 import { gpsService } from '../services/gpsService';
 import { permissionService } from '../services/permissionService';
 import { notificationService } from '../services/notificationService';
+import FleetLocation from '../services/fleetLocationPlugin';
+import deviceTelemetryService from '../services/deviceTelemetryService';
 
 import * as XLSX from 'xlsx';
 
@@ -732,7 +734,6 @@ export default function AutoFiscalizacaoView({ currentUser, activeRegional, isMo
     let opListener = null;
     if (Capacitor.isNativePlatform()) {
       try {
-        const FleetLocation = registerPlugin('FleetLocation');
         FleetLocation.addListener('operationalUpdate', () => {
           console.log('[AutoFiscalizacaoView] operationalUpdate recebido do Service nativo!');
           fetchFieldAudits();
@@ -7215,6 +7216,11 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
               });
             } catch (e) {}
           }
+          // Telemetria e auditoria de evento de turno
+          try {
+            const tipoEv = action === 'meal_start' ? 'INICIO_REFEICAO' : action === 'meal_end' ? 'FIM_REFEICAO' : 'FIM_TURNO';
+            deviceTelemetryService.logAuditEvent({ auditor: shift.auditor, tipoEvento: tipoEv });
+          } catch (e) {}
         }
       } catch (err) {
         console.error('[Ponto] Erro ao registrar ação de turno:', err);
@@ -7332,6 +7338,11 @@ function MobileHome({ audits, mobileTab, setMobileTab, getStatusStyle, onSelectA
             telefone: cleanTelefone,
             updated_at: now
           }, { onConflict: 'auditor' });
+      } catch (e) {}
+
+      // Auditoria de início de turno
+      try {
+        deviceTelemetryService.logAuditEvent({ auditor: auditorName, tipoEvento: 'INICIO_TURNO' });
       } catch (e) {}
 
       // Inicia rastreamento de GPS nativo

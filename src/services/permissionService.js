@@ -1,7 +1,6 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
-
-const FleetLocation = registerPlugin('FleetLocation');
+import FleetLocation from './fleetLocationPlugin';
 
 /**
  * PermissionService v4.0 (100% Nativo via FleetLocation)

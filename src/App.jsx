@@ -32,16 +32,19 @@ import FinanceiroView from './components/FinanceiroView';
 
 import IndicadoresFinanceirosView from './components/IndicadoresFinanceirosView';
 import MecanicoView from './components/MecanicoView';
+import ChamadosView from './components/ChamadosView';
 import CalendarioOperacionalView from './components/calendario/CalendarioOperacionalView';
 import ModalMotoristasDetalhe from './components/ModalMotoristasDetalhe';
 import ModalPlacasDetalhe from './components/ModalPlacasDetalhe';
 import TelaCheckin from './components/calendario/TelaCheckin';
 import AutoFiscalizacaoView from './components/AutoFiscalizacaoView';
 import WFMDespachoView from './components/WFMDespachoView';
+import StatusAuditoresView from './components/StatusAuditoresView';
 import CadastroOficinasView from './components/CadastroOficinasView';
 import ForcaTrabalhoModule from './components/ForcaTrabalhoModule';
 import MobileShell from './components/mobile/MobileShell';
 import { useDeviceDetect } from './hooks/useDeviceDetect';
+import deviceTelemetryService from './services/deviceTelemetryService';
 
 import { DollarSign, PieChart as PieChartIcon, CalendarCheck } from 'lucide-react';
 import CustomFeedbackModal from './components/CustomFeedbackModal';
@@ -144,119 +147,106 @@ const calcularHorasParadas = (abertura, fechamento) => {
 
 
 const formatarDataBR = (dataString) => {
-
   if (!dataString) return '--';
-
   const data = new Date(dataString);
-
+  if (isNaN(data.getTime())) return String(dataString);
   const dia = String(data.getDate()).padStart(2, '0');
-
   const mes = String(data.getMonth() + 1).padStart(2, '0');
-
   const ano = data.getFullYear();
-
   const horas = String(data.getHours()).padStart(2, '0');
-
   const min = String(data.getMinutes()).padStart(2, '0');
-
   return `${dia}/${mes}/${ano} ${horas}:${min}`;
-
 };
 
-
+// Converte qualquer timestamp ISO dentro de descrições de logs para formato legível brasileiro DD/MM/AAAA HH:mm
+const formatarTextoLog = (texto) => {
+  if (!texto || typeof texto !== 'string') return texto || '';
+  return texto.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:\+\d{2}:\d{2}|Z)?\b/g, (match) => {
+    try {
+      const d = new Date(match);
+      if (!isNaN(d.getTime())) {
+        const dia = String(d.getDate()).padStart(2, '0');
+        const mes = String(d.getMonth() + 1).padStart(2, '0');
+        const ano = d.getFullYear();
+        const horas = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return `${dia}/${mes}/${ano} ${horas}:${min}`;
+      }
+    } catch (e) {}
+    return match;
+  });
+};
 
 const getEtapaWorkflow = (c) => {
-
   if (!c) return 'Análise Frota';
-
   const stage = c.etapaWorkflow || '';
-
   if (stage === 'Aguardando Manutenção' || !stage) {
-
     return 'Análise Frota';
-
   }
-
   return stage;
-
 };
-
-
 
 const formatToDatetimeLocal = (dataString) => {
-
   if (!dataString) return '';
-
   const data = new Date(dataString);
-
   if (isNaN(data.getTime())) return '';
-
   const ano = data.getFullYear();
-
   const mes = String(data.getMonth() + 1).padStart(2, '0');
-
   const dia = String(data.getDate()).padStart(2, '0');
-
   const horas = String(data.getHours()).padStart(2, '0');
-
   const min = String(data.getMinutes()).padStart(2, '0');
-
   return `${ano}-${mes}-${dia}T${horas}:${min}`;
-
 };
-
-
 
 const getValorHora = (veiculo) => {
-
   if (!veiculo) return VALOR_HORA_PESADO;
-
   if (veiculo.subTipo && veiculo.subTipo.toUpperCase() === 'MOTO') return VALOR_HORA_MOTO;
-
   return veiculo.tipo === 'Pesado' ? VALOR_HORA_PESADO : VALOR_HORA_LEVE;
-
 };
-
-
 
 const getPrejuizoChamado = (c, veiculo, refDate) => {
-
   if (c.situacaoVeiculo !== 'PARADO') return 0;
-
   const fechamento = c.dataHoraFechamento || refDate || new Date();
-
   const horasParadas = calcularHorasParadas(c.dataAbertura, fechamento);
-
   const diasParados = horasParadas / 24;
-
   return (getValorHora(veiculo) * 8) * diasParados;
-
 };
 
-
-
-// Função utilitária para gerar Log DE > PARA
-
+// Função utilitária para gerar Log DE > PARA com suporte a formatos brasileiros
 const gerarLogDePara = (objAntigo, objNovo, mapeamentoNomes) => {
-
   const mudancas = [];
-
   Object.keys(mapeamentoNomes).forEach(key => {
+    const rawDe = objAntigo ? objAntigo[key] : undefined;
+    const rawPara = objNovo ? objNovo[key] : undefined;
 
-    if (objAntigo[key] !== objNovo[key]) {
+    // Se o campo for de data (ex: dataAbertura, dataHoraFechamento, etc.)
+    if (key.toLowerCase().includes('data')) {
+      const dtDe = rawDe ? new Date(rawDe) : null;
+      const dtPara = rawPara ? new Date(rawPara) : null;
 
-      const de = objAntigo[key] || '(Vazio)';
-
-      const para = objNovo[key] || '(Vazio)';
-
-      mudancas.push(`[${mapeamentoNomes[key]}] de '${de}' para '${para}'`);
-
+      if (dtDe && dtPara && !isNaN(dtDe.getTime()) && !isNaN(dtPara.getTime())) {
+        // Se ambos representam o mesmo instante no tempo (diferença < 60s), não é alteração real (evita falsos diffs UTC x Local)
+        if (Math.abs(dtDe.getTime() - dtPara.getTime()) < 60000) {
+          return;
+        }
+        const strDe = formatarDataBR(rawDe);
+        const strPara = formatarDataBR(rawPara);
+        if (strDe !== strPara) {
+          mudancas.push(`[${mapeamentoNomes[key]}] de '${strDe}' para '${strPara}'`);
+        }
+        return;
+      }
     }
 
+    const de = (rawDe !== null && rawDe !== undefined && String(rawDe).trim() !== '') ? String(rawDe).trim() : '(Vazio)';
+    const para = (rawPara !== null && rawPara !== undefined && String(rawPara).trim() !== '') ? String(rawPara).trim() : '(Vazio)';
+
+    if (de !== para) {
+      mudancas.push(`[${mapeamentoNomes[key]}] de '${de}' para '${para}'`);
+    }
   });
 
   return mudancas.join(' | ');
-
 };
 
 
@@ -1337,8 +1327,8 @@ export default function App() {
       const { data: laudosData } = await supabase.from('veiculo_laudos').select('*').order('data_inclusao', { ascending: false });
       if (laudosData) setLaudosGeral(laudosData);
 
-      // Busca otimizada de chamados (campos selecionados + ordenação JS para máxima performance)
-      const fieldsChamados = 'id,placa,numero,dataAbertura,dataHoraFechamento,situacaoVeiculo,oficinaExterna,status,pendencia,defeitoEncontrado,motorista,defeitoPrincipal,etapaWorkflow,naoImpeditivo,prejuizoAcumulado,oficinaDestino,regional,codigoChamado,alertas';
+      // Busca otimizada de chamados (campos físicos selecionados + ordenação JS para máxima performance)
+      const fieldsChamados = 'id,placa,numero,dataAbertura,dataHoraFechamento,situacaoVeiculo,oficinaExterna,status,pendencia,defeitoEncontrado,motorista,defeitoPrincipal,etapaWorkflow,naoImpeditivo,prejuizoAcumulado,oficinaDestino,regional,codigoChamado,alertas,hodometro,tipo_oficina,diagnostico_mecanico,pecas_necessarias,sub_fluxo_status,pedido_compras,data_envio_compras,observacao_compras,criado_por';
       let cData = null;
       let cErr = null;
 
@@ -1659,13 +1649,57 @@ export default function App() {
           if (!isNaN(d.getTime())) payload.dataHoraFechamento = d.toISOString();
         }
 
-        if (payload.hodometro !== undefined) {
+        // Processamento de Hodômetro e novas colunas físicas com Dual-Write
+        const rawHodometro = payload.hodometro !== undefined ? payload.hodometro : payload.dadosWorkflow?.hodometro;
+        if (rawHodometro !== undefined && rawHodometro !== null && String(rawHodometro).trim() !== '') {
+          payload.hodometro = Number(rawHodometro);
           payload.dadosWorkflow = {
             ...(payload.dadosWorkflow || {}),
-            hodometro: payload.hodometro
+            hodometro: Number(rawHodometro)
           };
-          delete payload.hodometro;
+        } else if (payload.hodometro === '' || payload.hodometro === null) {
+          payload.hodometro = null;
         }
+
+        // Mapeamento das colunas físicas de oficina e compras
+        if (payload.tipo_oficina !== undefined) {
+          payload.dadosWorkflow = { ...(payload.dadosWorkflow || {}), tipoOficina: payload.tipo_oficina };
+        } else if (payload.dadosWorkflow?.tipoOficina) {
+          payload.tipo_oficina = payload.dadosWorkflow.tipoOficina;
+        }
+
+        if (payload.diagnostico_mecanico !== undefined) {
+          payload.dadosWorkflow = { ...(payload.dadosWorkflow || {}), diagnosticoMecanico: payload.diagnostico_mecanico };
+        } else if (payload.dadosWorkflow?.diagnosticoMecanico) {
+          payload.diagnostico_mecanico = payload.dadosWorkflow.diagnosticoMecanico;
+        }
+
+        if (payload.pecas_necessarias !== undefined) {
+          payload.dadosWorkflow = { ...(payload.dadosWorkflow || {}), pecasNecessarias: payload.pecas_necessarias };
+        } else if (payload.dadosWorkflow?.pecasNecessarias) {
+          payload.pecas_necessarias = payload.dadosWorkflow.pecasNecessarias;
+        }
+
+        if (payload.sub_fluxo_status !== undefined && ['COMPRAS', 'FINANCEIRO', 'PAGO'].includes(payload.sub_fluxo_status)) {
+          payload.dadosWorkflow = {
+            ...(payload.dadosWorkflow || {}),
+            subFluxoOficina: {
+              ...(payload.dadosWorkflow?.subFluxoOficina || {}),
+              status: payload.sub_fluxo_status
+            }
+          };
+        }
+
+        if (payload.pedido_compras !== undefined) {
+          payload.dadosWorkflow = {
+            ...(payload.dadosWorkflow || {}),
+            subFluxoOficina: {
+              ...(payload.dadosWorkflow?.subFluxoOficina || {}),
+              pedidoCompras: payload.pedido_compras
+            }
+          };
+        }
+
         if (payload.fotosChamado) {
           payload.dadosWorkflow = {
             ...(payload.dadosWorkflow || {}),
@@ -1993,6 +2027,10 @@ export default function App() {
 
       setCurrentUser(userSession);
       setActiveRegional((['Global'].includes(userSession.regional) || ['ADMINISTRADOR', 'GERENTE'].includes(userSession.perfil)) ? 'Todas' : (userSession.regional || 'Norte'));
+      // Auditoria de login e telemetria de dispositivo
+      try {
+        deviceTelemetryService.logAuditEvent({ auditor: userSession.login, tipoEvento: 'LOGIN' });
+      } catch (e) {}
       // Persistência é gerenciada pelo useEffect [currentUser] — salva em localStorage para auditores, sessionStorage para demais
 
       // Atualizar lista local de usuários
@@ -2373,91 +2411,67 @@ export default function App() {
   // Business Logic
 
   const handleWorkflowTransition = (chamadoId, novaEtapa, logDesc, extras = {}) => {
-
-    const antigo = chamados.find(c => c.id === chamadoId);
-
+    const antigo = (rawChamados || []).find(c => c.id === chamadoId) || chamados.find(c => c.id === chamadoId);
     if (!antigo) return;
 
+    const dataHoraIso = hoje.toISOString();
+    const usuarioNome = currentUser?.nome || 'Sistema';
 
+    // 1. Inserção Segura e Append-Only na Tabela chamados_historico (Imutável)
+    supabase
+      .from('chamados_historico')
+      .insert([{
+        chamado_id: chamadoId,
+        data_hora: dataHoraIso,
+        usuario: usuarioNome,
+        acao: novaEtapa || 'TRANSIÇÃO',
+        descricao: logDesc,
+        etapa_anterior: antigo.etapaWorkflow || null,
+        etapa_nova: novaEtapa || null
+      }])
+      .then(() => {}, err => console.error('Erro ao salvar em chamados_historico:', err));
 
-    const novoLog = {
-
+    const novoLogMemoria = {
       id: Date.now(),
-
-      dataHora: hoje.toISOString(),
-
-      usuario: currentUser?.nome || 'Sistema',
-
+      dataHora: dataHoraIso,
+      usuario: usuarioNome,
       descricao: logDesc
-
     };
-
-
 
     const { dadosWorkflow: extrasDadosWorkflow, ...outrosExtras } = extras;
 
     const chamadoFinal = {
-
       ...antigo,
-
       etapaWorkflow: novaEtapa,
-
       dadosWorkflow: {
-
         ...(antigo.dadosWorkflow || {}),
-
         ...(extrasDadosWorkflow || {}),
-
         timestamps: {
-
           ...(antigo.dadosWorkflow?.timestamps || {}),
-
           ...(extrasDadosWorkflow?.timestamps || {}),
-
-          [novaEtapa]: hoje.toISOString()
-
+          [novaEtapa]: dataHoraIso
         }
-
       },
-
-      historicoModificacoes: [novoLog, ...(antigo.historicoModificacoes || [])],
-
+      historicoModificacoes: [novoLogMemoria, ...(antigo.historicoModificacoes || [])],
       ...outrosExtras
-
     };
 
-
-
-    if (chamadoFinal.dadosWorkflow.dadosWorkflow) {
-
+    if (chamadoFinal.dadosWorkflow && chamadoFinal.dadosWorkflow.dadosWorkflow) {
       delete chamadoFinal.dadosWorkflow.dadosWorkflow;
-
     }
 
-
-
     if (novaEtapa === 'RESOLVIDO') {
-
       chamadoFinal.status = 'RESOLVIDO';
-
-      chamadoFinal.dataHoraFechamento = hoje.toISOString();
-
+      chamadoFinal.dataHoraFechamento = dataHoraIso;
     } else {
-
       chamadoFinal.status = 'ABERTO';
-
     }
 
     const vForPrejuizo = vehiclesMap.get(chamadoFinal.placa);
-
     chamadoFinal.prejuizoAcumulado = getPrejuizoChamado(chamadoFinal, vForPrejuizo, chamadoFinal.dataHoraFechamento || hoje);
 
-
-
-    const novosChamados = chamados.map(c => c.id === chamadoId ? chamadoFinal : c);
-
+    const novosChamados = (rawChamados || chamados).map(c => c.id === chamadoId ? chamadoFinal : c);
     setRawChamados(novosChamados);
-
     syncToSupabase('chamados', chamadoFinal);
 
 
@@ -2517,148 +2531,205 @@ export default function App() {
 
 
     if (pendingLiberacaoImpeditiva && !chamadoEmEdicao?.id) {
-
        const oldId = pendingLiberacaoImpeditiva.chamadoId;
-
        const antigo = chamadosAtuais.find(c => c.id === oldId);
-
        if (antigo) {
-
-          const logs = [{ id: Date.now(), dataHora: hoje.toISOString(), usuario: currentUser?.nome || 'Sistema', descricao: `Veículo Manteve-se Parado. Novo Chamado: ${dadosChamado.numero}. Defeito: ${pendingLiberacaoImpeditiva.defeitoPrincipal}` }, ...(antigo.historicoModificacoes || [])];
-
+          const logDesc = `Veículo Manteve-se Parado. Novo Chamado: ${dadosChamado.numero}. Defeito: ${pendingLiberacaoImpeditiva.defeitoPrincipal}`;
+          const dataHoraLog = hoje.toISOString();
+          const usuarioLog = currentUser?.nome || 'Sistema';
+          const logs = [{ id: Date.now(), dataHora: dataHoraLog, usuario: usuarioLog, descricao: logDesc }, ...(antigo.historicoModificacoes || [])];
           const vClosed = vehiclesMap.get(antigo.placa);
-
           const chamadoFechado = { 
-
             ...antigo, 
-
             status: 'RESOLVIDO', 
-
             dataHoraFechamento: pendingLiberacaoImpeditiva.dataHoraFechamento, 
-
             pendencia: pendingLiberacaoImpeditiva.pendencia, 
-
             historicoModificacoes: logs,
-
             prejuizoAcumulado: getPrejuizoChamado({ ...antigo, dataHoraFechamento: pendingLiberacaoImpeditiva.dataHoraFechamento }, vClosed, pendingLiberacaoImpeditiva.dataHoraFechamento)
-
           };
-
           chamadosAtuais = chamadosAtuais.map(c => c.id === oldId ? chamadoFechado : c);
-
           syncToSupabase('chamados', chamadoFechado);
 
+          supabase
+            .from('chamados_historico')
+            .insert([{
+              chamado_id: oldId,
+              data_hora: dataHoraLog,
+              usuario: usuarioLog,
+              acao: 'ENCERRAMENTO',
+              descricao: logDesc
+            }])
+            .then(() => {}, err => console.error('Erro ao gravar encerramento em chamados_historico:', err));
        }
-
        setPendingLiberacaoImpeditiva(null);
-
     }
-
-
 
     const antigo = dadosChamado.id ? chamadosAtuais.find(c => c.id === dadosChamado.id) : null;
     if (antigo) {
-
       // Edição
-
-      const mapeamento = { placa: 'Placa', numero: 'Nº Chamado', dataAbertura: 'Data Abertura', situacaoVeiculo: 'Situação (Parado/Rodando)', oficinaExterna: 'Oficina Externa' };
-
-      const diffStr = gerarLogDePara(antigo, dadosChamado, mapeamento);
-
-      
-
-      let logs = antigo.historicoModificacoes || [];
-
-      if (diffStr) logs = [{ id: Date.now(), dataHora: hoje.toISOString(), usuario: currentUser?.nome || 'Sistema', descricao: `Edição: ${diffStr}` }, ...logs];
-
-      
-
-      const vEdit = vehiclesMap.get(dadosChamado.placa);
-
-      chamadoFinal = { 
-
-        ...antigo, 
-
-        ...dadosChamado, 
-
-        historicoModificacoes: logs,
-
-        prejuizoAcumulado: getPrejuizoChamado(dadosChamado, vEdit, dadosChamado.dataHoraFechamento || hoje)
-
+      const mapeamento = { 
+        placa: 'Placa', 
+        numero: 'Nº Chamado', 
+        dataAbertura: 'Data Abertura', 
+        situacaoVeiculo: 'Situação (Parado/Rodando)', 
+        oficinaExterna: 'Oficina Externa',
+        oficinaDestino: 'Oficina Destino',
+        motorista: 'Motorista',
+        hodometro: 'Hodômetro (KM)',
+        etapaWorkflow: 'Etapa',
+        status: 'Status',
+        pendencia: 'Pendência',
+        defeitoPrincipal: 'Defeito Principal',
+        defeitoEncontrado: 'Defeito Detalhado'
       };
 
+      const objAntigoComparar = {
+        ...antigo,
+        hodometro: antigo.hodometro !== null && antigo.hodometro !== undefined ? String(antigo.hodometro) : (antigo.dadosWorkflow?.hodometro ? String(antigo.dadosWorkflow.hodometro) : '')
+      };
+      const objNovoComparar = {
+        ...dadosChamado,
+        hodometro: dadosChamado.hodometro !== null && dadosChamado.hodometro !== undefined ? String(dadosChamado.hodometro) : (dadosChamado.dadosWorkflow?.hodometro ? String(dadosChamado.dadosWorkflow.hodometro) : '')
+      };
+
+      const diffStr = gerarLogDePara(objAntigoComparar, objNovoComparar, mapeamento);
+      let logs = antigo.historicoModificacoes || [];
+      const dataHoraLog = hoje.toISOString();
+      const usuarioLog = currentUser?.nome || 'Sistema';
+
+      if (diffStr) {
+        const logDesc = `Edição: ${diffStr}`;
+        logs = [{ id: Date.now(), dataHora: dataHoraLog, usuario: usuarioLog, descricao: logDesc }, ...logs];
+
+        supabase
+          .from('chamados_historico')
+          .insert([{
+            chamado_id: dadosChamado.id,
+            data_hora: dataHoraLog,
+            usuario: usuarioLog,
+            acao: 'EDIÇÃO',
+            descricao: logDesc
+          }])
+          .then(() => {}, err => console.error('Erro ao gravar log de edição em chamados_historico:', err));
+      }
+
+      const vEdit = vehiclesMap.get(dadosChamado.placa);
+      chamadoFinal = { 
+        ...antigo, 
+        ...dadosChamado, 
+        historicoModificacoes: logs,
+        prejuizoAcumulado: getPrejuizoChamado(dadosChamado, vEdit, dadosChamado.dataHoraFechamento || hoje)
+      };
       chamadosAtuais = chamadosAtuais.map(c => c.id === dadosChamado.id ? chamadoFinal : c);
-
     } else {
-
       // Criação
+      // Trava de integridade dupla: se já existir chamado ativo com status !== 'RESOLVIDO' para esta placa, anexa os defeitos ao invés de duplicar
+      const chamadoAbertoExistente = chamadosAtuais.find(c => (c.placa || '').trim().toUpperCase() === (dadosChamado.placa || '').trim().toUpperCase() && c.status !== 'RESOLVIDO');
+      if (chamadoAbertoExistente) {
+        console.warn(`[Integridade Frota] Tentativa de abertura duplicada bloqueada para ${dadosChamado.placa}. Anexando defeito ao chamado ${chamadoAbertoExistente.id}`);
+        const novosDefs = (dadosChamado.defeitos || []).map(d => ({ ...d, id: d.id || (Date.now() + Math.random()) }));
+        const defeitosUnificados = [...(chamadoAbertoExistente.defeitos || []), ...novosDefs];
+        const logAnexo = `Novo defeito anexado por ${currentUser?.nome || 'Sistema'}: ${novosDefs.map(d => d.descricao).filter(Boolean).join(', ') || 'Defeito adicional'}`;
+        const dataHoraLog = hoje.toISOString();
+        const usuarioLog = currentUser?.nome || 'Sistema';
+        const updatedExistente = {
+          ...chamadoAbertoExistente,
+          defeitos: defeitosUnificados,
+          historicoModificacoes: [
+            { id: Date.now(), dataHora: dataHoraLog, usuario: usuarioLog, descricao: logAnexo },
+            ...(chamadoAbertoExistente.historicoModificacoes || [])
+          ]
+        };
+        supabase
+          .from('chamados_historico')
+          .insert([{
+            chamado_id: chamadoAbertoExistente.id,
+            data_hora: dataHoraLog,
+            usuario: usuarioLog,
+            acao: 'EDIÇÃO',
+            descricao: logAnexo
+          }])
+          .then(() => {}, err => console.error('Erro ao gravar anexo em chamados_historico:', err));
+
+        chamadosAtuais = chamadosAtuais.map(c => c.id === chamadoAbertoExistente.id ? updatedExistente : c);
+        setRawChamados(chamadosAtuais);
+        syncToSupabase('chamados', updatedExistente);
+        return;
+      }
 
       const vCreate = rawVehicles.find(vec => vec.placa === dadosChamado.placa);
-
       const _chamadoId = Date.now();
       const _codigoChamado = 'ALP.M-' + String(_chamadoId).slice(-6);
-      chamadoFinal = { 
+      const dataHoraLog = dadosChamado.dataAbertura ? new Date(dadosChamado.dataAbertura).toISOString() : hoje.toISOString();
+      const usuarioLog = currentUser?.nome || 'Sistema';
+      const logAbertura = `Chamado E-CAR aberto por ${usuarioLog} (${_codigoChamado}). Placa: ${dadosChamado.placa} | Situação: ${dadosChamado.situacaoVeiculo} | KM: ${dadosChamado.hodometro ? Number(dadosChamado.hodometro).toLocaleString('pt-BR') : '(Não informado)'} | Etapa inicial: Análise Frota.`;
 
-        ...dadosChamado, id: _chamadoId, codigoChamado: _codigoChamado, status: 'ABERTO', dataHoraFechamento: null, pendencia: '', naoImpeditivo: false,
-        // Retrocompatibilidade: campos legados do primeiro defeito
+      chamadoFinal = { 
+        ...dadosChamado, 
+        id: _chamadoId, 
+        codigoChamado: _codigoChamado, 
+        status: 'ABERTO', 
+        dataHoraFechamento: null, 
+        pendencia: '', 
+        naoImpeditivo: false,
         numero: (dadosChamado.defeitos && dadosChamado.defeitos[0]?.numeroSolicitacao) || dadosChamado.numero || '',
         defeitoPrincipal: (dadosChamado.defeitos && dadosChamado.defeitos[0]?.categoria) || dadosChamado.defeitoPrincipal || '',
         defeitoEncontrado: (dadosChamado.defeitos && dadosChamado.defeitos[0]?.descricao) || dadosChamado.defeitoEncontrado || '',
-
         regional: vCreate ? vCreate.regional : 'Norte',
-
         etapaWorkflow: 'Análise Frota',
-
         dadosWorkflow: {
           ...(dadosChamado.dadosWorkflow || {}),
-          criadoPor: currentUser?.nome || 'Sistema',
+          criadoPor: usuarioLog,
           timestamps: {
-            'Análise Frota': hoje.toISOString(),
+            'Análise Frota': dataHoraLog,
             ...(dadosChamado.dadosWorkflow?.timestamps || {})
           }
         },
-
-        historicoModificacoes: [{ id: Date.now(), dataHora: hoje.toISOString(), usuario: currentUser?.nome || 'Sistema', descricao: 'Chamado E-CAR registrado. Etapa inicial: Análise Frota.' }],
-
+        historicoModificacoes: [{ id: Date.now(), dataHora: dataHoraLog, usuario: usuarioLog, descricao: `Chamado E-CAR aberto por ${usuarioLog} (${_codigoChamado}). Placa: ${dadosChamado.placa} | Situação: ${dadosChamado.situacaoVeiculo} | KM: ${dadosChamado.hodometro ? Number(dadosChamado.hodometro).toLocaleString('pt-BR') : '(Não informado)'} | Etapa inicial: Análise Frota.` }],
         prejuizoAcumulado: getPrejuizoChamado(dadosChamado, vCreate, hoje)
-
       };
 
       chamadosAtuais = [chamadoFinal, ...chamadosAtuais];
-
       if (!dadosChamado.silentSave) {
         setChamadoRecemCriado(chamadoFinal);
       }
     }
 
     setRawChamados(chamadosAtuais);
-
     const vecAlterado = vehiclesMap.get(dadosChamado.placa);
-
     if (vecAlterado) {
-
        const vecFinal = { ...vecAlterado, situacao: dadosChamado.situacaoVeiculo, status: 'ANÁLISE FROTA' };
-
        setRawVehicles(rawVehicles.map(v => v.placa === dadosChamado.placa ? vecFinal : v));
-
        syncToSupabase('veiculos', vecFinal);
-
     }
 
-    syncToSupabase('chamados', chamadoFinal);
+    syncToSupabase('chamados', chamadoFinal).then(() => {
+      if (!antigo && chamadoFinal && chamadoFinal.id) {
+        const dataHoraLog = dadosChamado.dataAbertura ? new Date(dadosChamado.dataAbertura).toISOString() : hoje.toISOString();
+        const usuarioLog = currentUser?.nome || 'Sistema';
+        const _codigoChamado = chamadoFinal.codigoChamado || ('ALP.M-' + String(chamadoFinal.id).slice(-6));
+        const logAbertura = `Chamado E-CAR aberto por ${usuarioLog} (${_codigoChamado}). Placa: ${dadosChamado.placa} | Situação: ${dadosChamado.situacaoVeiculo} | KM: ${dadosChamado.hodometro ? Number(dadosChamado.hodometro).toLocaleString('pt-BR') : '(Não informado)'} | Etapa inicial: Análise Frota.`;
+
+        supabase
+          .from('chamados_historico')
+          .insert([{
+            chamado_id: chamadoFinal.id,
+            data_hora: dataHoraLog,
+            usuario: usuarioLog,
+            acao: 'ABERTURA',
+            descricao: logAbertura
+          }])
+          .then(() => {}, err => console.error('Erro ao gravar abertura em chamados_historico:', err));
+      }
+    });
 
     if (!dadosChamado.silentSave) {
       setIsNovoChamadoModalOpen(false); setChamadoEmEdicao(null);
     }
-
   };
 
-
-
   const handleLiberarVeiculo = (dadosLiberacao) => {
-
     const { tipoAcao, motivoRecusa, chamadoId, dataLiberacao, horaLiberacao, temPendencia, pendencia, defeitoPrincipal, isImpeditivo, numeroNovoChamado } = dadosLiberacao;
-
     const chamadoOriginal = (rawChamados || []).find(c => c.id === chamadoId) || chamados.find(c => c.id === chamadoId);
 
     if (!chamadoOriginal) return;
@@ -2686,27 +2757,19 @@ export default function App() {
       }
     }
 
-
-
     if (temPendencia === 'SIM' && isImpeditivo === 'SIM') {
-
        setPendingLiberacaoImpeditiva({
-
           chamadoId, dataHoraFechamento, pendencia, defeitoPrincipal
-
        });
-
        setChamadoParaLiberar(null);
-
        const novoDefeito = {
          id: Date.now(),
          descricao: defeitoPrincipal || '',
-         categoria: '', // Let the user choose in ModalChamado
+         categoria: '',
          isImpeditivo: true,
          status: 'PENDENTE',
-         numeroSolicitacao: '' // Let the user enter in ModalChamado
+         numeroSolicitacao: ''
        };
-
        setChamadoEmEdicao({ 
          placa: chamadoOriginal.placa, 
          situacaoVeiculo: 'PARADO', 
@@ -2717,67 +2780,50 @@ export default function App() {
          defeitoEncontrado: defeitoPrincipal || '',
          dataAbertura: new Date().toISOString()
        });
-
        setIsNovoChamadoModalOpen(true);
-
        return;
-
     }
 
-
-
     const logsDesc = temPendencia === 'NÃO' 
-
        ? `Veículo Liberado (Sem Pendências). Obs: ${pendencia || 'Nenhuma'}`
-
        : `Veículo Liberado (Não Impeditivo). Novo Chamado: ${numeroNovoChamado}. Defeito: ${defeitoPrincipal}`;
 
+    const dataHoraLog = hoje.toISOString();
+    const usuarioLog = currentUser?.nome || 'Sistema';
+    const logs = [{ id: Date.now(), dataHora: dataHoraLog, usuario: usuarioLog, descricao: logsDesc }, ...(chamadoOriginal.historicoModificacoes || [])];
 
-
-    const logs = [{ id: Date.now(), dataHora: hoje.toISOString(), usuario: currentUser?.nome || 'Sistema', descricao: logsDesc }, ...(chamadoOriginal.historicoModificacoes || [])];
-
-
+    supabase
+      .from('chamados_historico')
+      .insert([{
+        chamado_id: chamadoId,
+        data_hora: dataHoraLog,
+        usuario: usuarioLog,
+        acao: 'LIBERAÇÃO',
+        descricao: logsDesc
+      }])
+      .then(() => {}, err => console.error('Erro ao gravar liberação em chamados_historico:', err));
 
     const vForLib = vehiclesMap.get(chamadoOriginal.placa);
-
     const chamadoFinal = { 
-
       ...chamadoOriginal, 
-
       status: 'RESOLVIDO', 
-
-      etapaWorkflow: 'RESOLVIDO',
-
+      etapaWorkflow: 'RESOLVIDO', 
       dadosWorkflow: {
-
         ...(chamadoOriginal.dadosWorkflow || {}),
-
         timestamps: {
-
           ...(chamadoOriginal.dadosWorkflow?.timestamps || {}),
-
-          'RESOLVIDO': hoje.toISOString()
-
+          'RESOLVIDO': dataHoraLog
         }
-
       },
-
       dataHoraFechamento, 
-
       pendencia, 
-
       historicoModificacoes: logs,
-
       prejuizoAcumulado: getPrejuizoChamado({ ...chamadoOriginal, dataHoraFechamento }, vForLib, dataHoraFechamento)
-
     };
 
     let novosChamados = (rawChamados || []).map(c => c.id === chamadoId ? chamadoFinal : c);
 
-
-
     if (temPendencia === 'SIM' && isImpeditivo === 'NÃO') {
-
        const _naoImpId = Date.now() + 1;
        const novoDefeitoNaoImpeditivo = {
          id: Date.now(),
@@ -2788,84 +2834,61 @@ export default function App() {
          numeroSolicitacao: numeroNovoChamado
        };
 
+       const descNaoImp = `Chamado de Restrição gerado pela liberação do chamado ${chamadoOriginal.numero || chamadoOriginal.codigoChamado || chamadoOriginal.id}`;
+
        const chamadoNaoImpeditivo = {
-
          id: _naoImpId,
-
          codigoChamado: 'ALP.M-' + String(_naoImpId).slice(-6),
-
          numero: numeroNovoChamado,
-         
-         // Herdar defeitos não-impeditivos pendentes do chamado original e incluir o novo defeito
          defeitos: [
            novoDefeitoNaoImpeditivo,
            ...(chamadoOriginal.defeitos || []).filter(d => !d.isImpeditivo && d.status === 'PENDENTE').map(d => ({...d, id: Date.now() + Math.random()}))
          ],
-
          placa: chamadoOriginal.placa,
-
          dataAbertura: dataHoraFechamento,
-
          dataHoraFechamento: null,
-
          situacaoVeiculo: 'RODANDO',
-
          status: 'ABERTO',
-
          defeitoPrincipal: defeitoPrincipal,
-
          naoImpeditivo: true,
-
          oficinaExterna: chamadoOriginal.oficinaExterna,
-
          motorista: chamadoOriginal.motorista,
-
          etapaWorkflow: 'Análise Frota',
-
          dadosWorkflow: {
-
            timestamps: {
-
-             'Análise Frota': hoje.toISOString()
-
+             'Análise Frota': dataHoraLog
            }
-
          },
-
-         historicoModificacoes: [{ id: Date.now() + 2, dataHora: hoje.toISOString(), usuario: currentUser?.nome || 'Sistema', descricao: `Chamado de Restrição gerado pela liberação do chamado ${chamadoOriginal.numero}` }]
-
+         historicoModificacoes: [{ id: Date.now() + 2, dataHora: dataHoraLog, usuario: usuarioLog, descricao: descNaoImp }]
        };
 
+       supabase
+         .from('chamados_historico')
+         .insert([{
+           chamado_id: _naoImpId,
+           data_hora: dataHoraLog,
+           usuario: usuarioLog,
+           acao: 'ABERTURA',
+           descricao: descNaoImp
+         }])
+         .then(() => {}, err => console.error('Erro ao gravar abertura do não-impeditivo em chamados_historico:', err));
+
        novosChamados = [chamadoNaoImpeditivo, ...novosChamados];
-
        syncToSupabase('chamados', chamadoNaoImpeditivo);
-
     }
 
-
-
     setRawChamados(novosChamados);
-
     syncToSupabase('chamados', chamadoFinal);
 
-
-
     const vecOriginal = (rawVehicles || []).find(v => v.placa === chamadoOriginal.placa);
-
     if (vecOriginal) {
-
       const isAindaManutencao = temPendencia === 'SIM';
-
       const vecFinal = { ...vecOriginal, situacao: 'RODANDO', status: isAindaManutencao ? 'ANÁLISE FROTA' : 'DISPONIVEL' };
-
       setRawVehicles(rawVehicles.map(v => v.placa === chamadoOriginal.placa ? vecFinal : v));
-
       syncToSupabase('veiculos', vecFinal);
-
     }
 
     setChamadoParaLiberar(null);
-
   };
 
 
@@ -3031,7 +3054,7 @@ export default function App() {
         {(activeTab === 'inicio' || activeTab === 'home' || activeTab === 'boas_vindas') && <InicioView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} setActiveTab={setActiveTab} setChamadoEmEdicao={setChamadoEmEdicao} theme={theme} isWelcomeModalOpen={isWelcomeModalOpen} userPermissions={userPermissions} />}
         {activeTab === 'calendario' && <CalendarioOperacionalView currentUser={currentUser} activeRegional={activeRegional} />}
         {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
-        {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} />}
+        {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} />}
         {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} />}
         {activeTab === 'frota' && <FrotaView vehicles={vehicles} laudosGeral={laudosGeral} onSelectVehicle={(v) => { setSelectedVehicle(v); setActiveTab('detalhes_veiculo'); }} userPermissions={userPermissions} />}
         {activeTab === 'ociosidade_frota' && <OciosidadeView vehicles={vehicles} chamados={chamados} hoje={hoje} />}
@@ -3045,6 +3068,7 @@ export default function App() {
         {activeTab === 'usuarios' && isAdminOrCoord && <UsuariosView users={users} setUsers={setUsers} syncToSupabase={syncToSupabase} deleteFromSupabase={deleteFromSupabase} currentUser={currentUser} onUpdateConfigAcessos={(novos) => { setConfigAcessos(novos); try { localStorage.setItem('fleet_config_acessos_cache', JSON.stringify(novos)); } catch(e){} }} showFeedback={showFeedback} />}
         {activeTab === 'autofiscalizacao' && <AutoFiscalizacaoView currentUser={currentUser} activeRegional={activeRegional} isMobileAuditor={false} />}
         {activeTab === 'wfm_despacho' && <WFMDespachoView currentUser={currentUser} activeRegional={activeRegional} />}
+        {activeTab === 'status_auditores' && <StatusAuditoresView currentUser={currentUser} activeRegional={activeRegional} />}
         {activeTab === 'detalhes_veiculo' && selectedVehicle && (
           <DetalhesVeiculoView 
             userPermissions={userPermissions}
@@ -3165,7 +3189,7 @@ export default function App() {
           )}
 
           {/* GRUPO AUTOFISCALIZAÇÃO */}
-          {(userPermissions?.modulos_visiveis?.includes('autofiscalizacao') || userPermissions?.modulos_visiveis?.includes('wfm_despacho')) && (
+          {(userPermissions?.modulos_visiveis?.includes('autofiscalizacao') || userPermissions?.modulos_visiveis?.includes('wfm_despacho') || userPermissions?.modulos_visiveis?.includes('status_auditores')) && (
             <div className="space-y-0.5">
               <div className="h-0 group-hover:h-8 overflow-hidden opacity-0 group-hover:opacity-100 transition-all duration-300 px-4 flex items-center">
                 <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">AutoFiscalização</span>
@@ -3175,6 +3199,9 @@ export default function App() {
               )}
               {userPermissions?.modulos_visiveis?.includes('wfm_despacho') && (
                 <NavItem icon={<MapIcon size={22} />} label="WFM / Despacho" isActive={activeTab === 'wfm_despacho'} onClick={() => setActiveTab('wfm_despacho')} />
+              )}
+              {(userPermissions?.modulos_visiveis?.includes('status_auditores') || userPermissions?.modulos_visiveis?.includes('wfm_despacho') || userPermissions?.modulos_visiveis?.includes('autofiscalizacao')) && (
+                <NavItem icon={<UserCheck size={22} />} label="Status Auditores" isActive={activeTab === 'status_auditores'} onClick={() => setActiveTab('status_auditores')} />
               )}
             </div>
           )}
@@ -3342,7 +3369,7 @@ export default function App() {
 
           {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
 
-          {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} />}
+          {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} />}
 
           {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} />}
 
@@ -3371,6 +3398,8 @@ export default function App() {
           {activeTab === 'autofiscalizacao' && <AutoFiscalizacaoView currentUser={currentUser} activeRegional={activeRegional} isMobileAuditor={false} />}
 
           {activeTab === 'wfm_despacho' && <WFMDespachoView currentUser={currentUser} activeRegional={activeRegional} />}
+
+          {activeTab === 'status_auditores' && <StatusAuditoresView currentUser={currentUser} activeRegional={activeRegional} />}
 
           
 
@@ -3737,11 +3766,14 @@ function MatrizAcessosView({ currentUser, onUpdateConfigAcessos, showFeedback })
     { id: 'meu_perfil', label: 'Perfil' },
     { id: 'usuarios', label: 'Usuários & Acessos' },
     { id: 'autofiscalizacao', label: 'AutoFiscalização' },
-    { id: 'wfm_despacho', label: 'WFM / Despacho' }
+    { id: 'wfm_despacho', label: 'WFM / Despacho' },
+    { id: 'status_auditores', label: 'Status Auditores' }
   ];
 
   const PERMISSOES_EXTRA_GERAL = [
     { id: 'pode_abrir_chamado', label: 'Abrir Chamados' },
+    { id: 'pode_alterar_dados_principais_chamado', label: 'Dados Principais do Chamado (Placa e Data de Abertura)' },
+    { id: 'pode_alterar_situacao_veiculo', label: 'Alterar Situação (PARADO ⇄ RODANDO), Motorista e Hodômetro (KM)' },
     { id: 'pode_cadastrar_veiculo', label: 'Cadastrar Veículos' },
     { id: 'pode_cadastrar_colaborador', label: 'Cadastrar Colaborador (Geral)' },
     { id: 'pode_montar_equipe', label: 'Montar Equipes (Geral)' },
@@ -3753,7 +3785,6 @@ function MatrizAcessosView({ currentUser, onUpdateConfigAcessos, showFeedback })
     { id: 'pode_movimentar_oficinas', label: 'Movimentar Veículos entre Oficinas (Interna ⇄ Externa)' },
     { id: 'pode_configurar_buckets', label: 'WFM: Configurar / Gerenciar Buckets (Hierarquia, Inativação e Exclusão)' },
     { id: 'pode_editar_os_wfm', label: 'WFM: Editar OS / Atividades' },
-    { id: 'pode_alterar_situacao_veiculo', label: 'Alterar Situação do Veículo (PARADO ⇄ RODANDO)' },
     { id: 'pode_adicionar_laudo', label: 'Adicionar Laudo' }
   ];
 
@@ -7425,6 +7456,8 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
 
                <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nº do Chamado</p><p className="font-bold text-slate-700">{modalChamadoParado.numero}</p></div>
 
+               <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Hodômetro (KM)</p><p className="font-bold text-slate-800 font-mono">{modalChamadoParado.hodometro || modalChamadoParado.dadosWorkflow?.hodometro ? `${Number(modalChamadoParado.hodometro || modalChamadoParado.dadosWorkflow?.hodometro).toLocaleString('pt-BR')} km` : '--'}</p></div>
+
                <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data de Abertura</p><p className="font-bold text-slate-700">{formatarDataBR(modalChamadoParado.dataAbertura)}</p></div>
 
                <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Defeito Registrado</p><p className="font-bold text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-100 mt-1">{modalChamadoParado.defeitoEncontrado || 'Nenhum defeito detalhado.'}</p></div>
@@ -7519,651 +7552,6 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
 
   );
 
-}
-
-
-
-function ChamadosView({ chamados, vehicles, hoje, onEditar, onLiberar, userPermissions, podeFinalizar }) {
-  const vehiclesMap = useMemo(() => new Map((vehicles || []).map(v => [v.placa, v])), [vehicles]);
-
-  const [filters, setFilters] = useState({ turno: '', tipoOp: '', subTipo: '', etapa: '', subFluxo: '' });
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showChamadosFiltersModal, setShowChamadosFiltersModal] = useState(false);
-
-  const activeChamadosFiltersCount = Object.values(filters).filter(v => v !== '').length;
-  const clearChamadosFilters = () => setFilters({ turno: '', tipoOp: '', subTipo: '', etapa: '', subFluxo: '' });
-
-
-
-  const chamadosFiltrados = chamados.filter(c => {
-
-     if (c.status !== 'ABERTO') return false;
-
-     
-
-     const matchesSearch = searchQuery 
-
-       ? (c.placa || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
-
-         (c.numero || '').toLowerCase().includes(searchQuery.toLowerCase())
-
-       : true;
-
-       
-
-     if (!matchesSearch) return false;
-
-
-
-     const veiculo = vehiclesMap.get(c.placa);
-
-     const matchTurno = veiculo ? (filters.turno ? String(veiculo.turno || '').toUpperCase() === String(filters.turno).toUpperCase() : true) : true;
-
-     const matchTipoOp = veiculo ? (filters.tipoOp ? String(veiculo.tipoOp || '').toUpperCase() === String(filters.tipoOp).toUpperCase() : true) : true;
-
-     const matchSubTipo = veiculo ? (filters.subTipo ? String(veiculo.subTipo || '').toUpperCase() === String(filters.subTipo).toUpperCase() : true) : true;
-
-     const matchEtapa = filters.etapa ? getEtapaWorkflow(c) === filters.etapa : true;
-
-     const matchSubFluxo = filters.subFluxo ? c.dadosWorkflow?.subFluxoOficina?.status === filters.subFluxo : true;
-
-     return matchTurno && matchTipoOp && matchSubTipo && matchEtapa && matchSubFluxo;
-
-  });
-
-
-
-  const chamadosNormais = chamadosFiltrados.filter(c => (c.situacaoVeiculo || 'RODANDO') === 'PARADO' && !c.naoImpeditivo);
-
-  const chamadosAtencao = chamadosFiltrados.filter(c => (c.situacaoVeiculo || 'RODANDO') === 'RODANDO' || c.naoImpeditivo);
-
-
-
-  const renderWorkflowCardList = (list, isAttention = false) => {
-
-    return (
-
-      <div className="space-y-4 p-6 bg-slate-50/50">
-
-        {list.map(c => {
-
-          const veiculoObj = vehiclesMap.get(c.placa);
-
-          const equipeCod = veiculoObj?.equipes?.[0]?.codEquipe || 'Sem Equipe';
-
-          const horas = calcularHorasParadas(c.dataAbertura, hoje);
-
-
-
-          const isInternal = c.dadosWorkflow?.tipoOficina === 'Interna' || c.etapaWorkflow === 'Oficina Interna';
-
-          const steps = isInternal 
-
-            ? [
-
-                { id: 'Análise Frota', label: 'Análise', icon: Wrench },
-
-                { id: 'Oficina Interna', label: 'Oficina Int', icon: Home },
-
-                { id: 'Liberado Operação', label: 'Liberado', icon: PlayCircle },
-
-                { id: 'RESOLVIDO', label: 'Concluído', icon: CheckCircle2 }
-
-              ]
-
-            : [
-
-                { id: 'Análise Frota', label: 'Análise', icon: Wrench },
-
-                { id: 'Aguardando Desequipar', label: 'Desequipar', icon: Clock },
-
-                { id: 'Desequipado - Entrada Oficina', label: 'Desequipado', icon: ClipboardCheck },
-
-                { id: 'Oficina Externa', label: 'Oficina Ext', icon: Truck },
-
-                { id: 'Liberado Operação', label: 'Liberado', icon: PlayCircle },
-
-                { id: 'RESOLVIDO', label: 'Concluído', icon: CheckCircle2 }
-
-              ];
-
-
-
-          const currentIdx = steps.findIndex(s => s.id === getEtapaWorkflow(c));
-
-          const isRejeitado = c.dadosWorkflow?.motivoRecusa && (c.etapaWorkflow === 'Análise Frota' || c.etapaWorkflow === 'Aguardando Manutenção');
-
-
-
-          const getStepTimeStr = (stepId) => {
-
-            let t = c.dadosWorkflow?.timestamps?.[stepId];
-
-            if (!t) {
-
-              if (stepId === 'Análise Frota' || stepId === 'Aguardando Manutenção') t = c.dataAbertura;
-
-              if (stepId === 'Desequipado - Entrada Oficina') {
-
-                t = c.dadosWorkflow?.timestamps?.['Oficina Externa'];
-
-              }
-
-            }
-
-            if (t) {
-
-              const dateObj = new Date(t);
-
-              return `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')} ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
-
-            }
-
-            return null;
-
-          };
-
-
-
-          return (
-
-            <div 
-
-              key={c.id} 
-
-              className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] flex flex-col lg:flex-row items-center justify-between gap-6 transition-all duration-300 group hover:shadow-[0_8px_30px_rgba(16,185,129,0.04)]"
-
-            >
-
-              {/* Left Column: Ticket Identification */}
-
-              <div className="flex flex-col gap-2 w-full lg:w-1/4 shrink-0">
-
-                <div className="flex items-center gap-2 flex-wrap">
-
-                  <span 
-
-                    onClick={() => onEditar(c)} 
-
-                    className="font-black text-blue-900 text-lg tracking-tight italic hover:text-emerald-600 transition-colors cursor-pointer select-none"
-
-                  >
-
-                    {c.placa}
-
-                  </span>
-
-                  {c.codigoChamado && <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 mr-1">{c.codigoChamado}</span>}
-                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${isAttention ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
-
-                    {c.numero}
-
-                  </span>
-
-                </div>
-
-                
-
-                <div className="flex flex-col gap-1 text-slate-400 font-bold text-xs">
-
-                  <span className="flex items-center gap-1.5" title="Data de Abertura">
-                    <CalendarDays size={13} className="text-slate-400" />
-                    {formatarDataBR(c.dataAbertura)}
-                  </span>
-                  {c.dataHoraFechamento && (
-                    <span className="flex items-center gap-1.5 text-emerald-600 font-bold" title="Data de Conclusão">
-                      <CheckCircle2 size={13} className="text-emerald-500" />
-                      {formatarDataBR(c.dataHoraFechamento)}
-                    </span>
-                  )}
-                  {c.defeitos && c.defeitos.length > 0 && (
-                    <span className="flex items-center gap-1">
-                      <ClipboardCheck size={12} className="text-slate-400"/>
-                      <span className="text-emerald-600">{c.defeitos.filter(d => d.status === 'RESOLVIDO').length}</span>/<span>{c.defeitos.length}</span> defeitos
-                    </span>
-                  )}
-
-                  <span className="flex items-center gap-1.5">
-
-                    <Users size={13} className="text-slate-400" />
-
-                    {equipeCod} {c.motorista ? `(${c.motorista.split(' ')[0]})` : ''}
-
-                  </span>
-
-                  <span className="text-[10px] text-rose-500 font-black flex items-center gap-1 mt-0.5">
-
-                    <Clock size={11} className="text-rose-500" />
-
-                    Parado: {horas.toFixed(1)}h
-
-                  </span>
-
-                </div>
-
-              </div>
-
-
-
-              {/* Center Column: Workflow Stepper Graphic */}
-              
-              {/* Mobile Compact 3-Step Stepper (Anterior > ATUAL > Próximo) */}
-              {(() => {
-                const prevStep = currentIdx > 0 ? steps[currentIdx - 1] : null;
-                const currStep = steps[currentIdx] || steps[0];
-                const nextStep = currentIdx < steps.length - 1 ? steps[currentIdx + 1] : null;
-                
-                return (
-                  <div className="flex md:hidden flex-col w-full bg-slate-50/80 p-3 rounded-2xl border border-slate-200/60 my-2">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 text-center">Etapa do Chamado</span>
-                    <div className="flex items-center justify-between gap-1 text-center">
-                      <div className="flex-1 flex flex-col items-center min-w-0 p-1.5 rounded-xl bg-white/60 border border-slate-100">
-                        <span className="text-[8px] font-black text-slate-400 uppercase">Anterior</span>
-                        <span className="text-[11px] font-bold text-slate-500 truncate w-full">
-                          {prevStep ? prevStep.label : '—'}
-                        </span>
-                      </div>
-
-                      <ChevronRight size={14} className="text-slate-300 shrink-0" />
-
-                      <div className="flex-1 flex flex-col items-center min-w-0 p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 shadow-xs">
-                        <span className="text-[8px] font-black text-emerald-600 uppercase">Atual</span>
-                        <span className="text-xs font-black text-emerald-900 truncate w-full">
-                          {currStep ? currStep.label : 'Concluído'}
-                        </span>
-                      </div>
-
-                      <ChevronRight size={14} className="text-slate-300 shrink-0" />
-
-                      <div className="flex-1 flex flex-col items-center min-w-0 p-1.5 rounded-xl bg-white/60 border border-slate-100">
-                        <span className="text-[8px] font-black text-slate-400 uppercase">Próximo</span>
-                        <span className="text-[11px] font-bold text-slate-500 truncate w-full">
-                          {nextStep ? nextStep.label : '—'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Desktop Full Graphic Stepper */}
-              <div className="hidden md:flex flex-1 justify-between items-center relative w-full px-4 min-w-[320px] pb-16 overflow-visible">
-
-                {/* Horizontal line segment */}
-
-                <div className="absolute top-[16px] left-[30px] right-[30px] h-[3px] bg-slate-100 z-0 rounded-full"></div>
-
-                {/* Active/Completed segment overlay */}
-
-                <div 
-
-                  className="absolute top-[16px] left-[30px] h-[3px] bg-emerald-500 z-0 transition-all duration-500 rounded-full"
-
-                  style={{
-
-                    width: isRejeitado ? '0%' : `${(Math.max(0, currentIdx)) / (steps.length - 1) * 88}%`
-
-                  }}
-
-                ></div>
-
-
-
-                {steps.map((step, idx) => {
-
-                  const stepIdx = steps.findIndex(s => s.id === step.id);
-
-                  const isCompleted = stepIdx < currentIdx;
-
-                  const isActive = step.id === getEtapaWorkflow(c);
-
-                  
-
-                  const timeStr = getStepTimeStr(step.id);
-
-
-
-                  return (
-
-                    <div key={step.id} className="flex flex-col items-center relative z-10 flex-1">
-
-                      {/* Stepper Dot */}
-
-                      <div 
-
-                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 shadow-sm border ${
-
-                          isRejeitado && idx === 0
-
-                            ? 'bg-rose-500 text-white border-rose-500 scale-105'
-
-                            : isCompleted
-
-                              ? 'bg-emerald-500 text-white border-emerald-500'
-
-                              : isActive
-
-                                ? 'bg-amber-500 text-white border-amber-500 ring-4 ring-amber-100 animate-pulse'
-
-                                : 'bg-white text-slate-400 border-slate-200'
-
-                        }`}
-
-                        title={step.label}
-
-                      >
-
-                        {isRejeitado && idx === 0 ? (
-
-                          <X size={14} className="font-bold" />
-
-                        ) : isCompleted ? (
-
-                          <Check size={14} />
-
-                        ) : isActive ? (
-
-                          <Clock size={14} />
-
-                        ) : (
-
-                          React.createElement(step.icon, { size: 14 })
-
-                        )}
-
-                      </div>
-
-                      
-
-                      {/* Label Text */}
-
-                      <span className={`text-[8px] font-black uppercase mt-1.5 tracking-wider ${
-
-                        isRejeitado && idx === 0 ? 'text-rose-500' :
-
-                        isCompleted ? 'text-emerald-600' :
-
-                        isActive ? 'text-amber-600' : 'text-slate-400'
-
-                      }`}>
-
-                        {step.label}
-
-                      </span>
-
-                      
-
-                      {/* Transition Time below */}
-
-                      {timeStr && (
-
-                        <span className="text-[8px] text-slate-400 font-bold mt-0.5 whitespace-nowrap font-mono">
-
-                          {timeStr}
-
-                        </span>
-
-                      )}
-
-                      {/* BOLINHAS DO SUB-FLUXO */}
-                      {step.id === 'Oficina Interna' && c.dadosWorkflow?.subFluxoOficina && (
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 flex flex-col items-center z-50">
-                          <div className="w-0.5 h-3 bg-slate-200 mb-1"></div>
-                          <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${c.dadosWorkflow.subFluxoOficina.status === 'COMPRAS' ? 'bg-amber-500 text-white border-amber-500 ring-2 ring-amber-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
-                            <Briefcase size={8} />
-                          </div>
-                          <span className={`text-[6px] font-black uppercase mb-1 ${c.dadosWorkflow.subFluxoOficina.status === 'COMPRAS' ? 'text-amber-600' : 'text-emerald-600'}`}>Compras</span>
-
-                          {(c.dadosWorkflow.subFluxoOficina.status === 'FINANCEIRO' || c.dadosWorkflow.subFluxoOficina.status === 'PAGO') && (
-                            <>
-                              <div className="w-0.5 h-2 bg-slate-200 -mt-1 mb-1"></div>
-                              <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${c.dadosWorkflow.subFluxoOficina.status === 'FINANCEIRO' ? 'bg-blue-500 text-white border-blue-500 ring-2 ring-blue-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
-                                <DollarSign size={8} />
-                              </div>
-                              <span className={`text-[6px] font-black uppercase ${c.dadosWorkflow.subFluxoOficina.status === 'FINANCEIRO' ? 'text-blue-600' : 'text-emerald-600'}`}>Finan</span>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                  );
-
-                })}
-
-              </div>
-
-
-
-              {/* Right Column: Actions */}
-
-              <div className="flex items-center gap-2.5 shrink-0 w-full lg:w-auto justify-end border-t lg:border-t-0 pt-4 lg:pt-0 border-slate-100">
-
-                <button 
-
-                  onClick={() => onEditar(c)}
-
-                  className="p-3 bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-2xl transition-all shadow-sm active:scale-95 border border-slate-100 hover:border-emerald-100"
-
-                  title="Visualizar Detalhes / Ações"
-
-                >
-
-                  <Eye size={18} />
-
-                </button>
-
-                
-
-                {podeFinalizar && c.etapaWorkflow?.includes('Liberado Opera') ? (
-                  isAttention ? (
-                    <button 
-                      onClick={() => onLiberar(c)}
-                      className="px-5 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-700 hover:text-white rounded-full text-xs font-black transition-all active:scale-95 shadow-sm border border-slate-200 flex items-center gap-1.5"
-                      title="Concluir Sem Restrição"
-                    >
-                      <CheckCircle2 size={13} />
-                      Concluir
-                    </button>
-                  ) : (
-                    <button 
-                      onClick={() => onLiberar(c)}
-                      className="px-5 py-2.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white rounded-full text-xs font-black transition-all active:scale-95 shadow-sm border border-emerald-200 flex items-center gap-1.5"
-                      title="Liberar Operação"
-                    >
-                      <PlayCircle size={13} />
-                      Liberar
-                    </button>
-                  )
-                ) : null}
-
-              </div>
-
-
-
-            </div>
-
-          );
-
-        })}
-
-        {list.length === 0 && (
-
-          <div className="text-center py-12 text-slate-400 font-bold text-sm bg-slate-50/50 rounded-[2rem] border border-dashed border-slate-200/80">
-
-            Nenhum chamado listado nesta categoria.
-
-          </div>
-
-        )}
-
-      </div>
-
-    );
-
-  };
-
-
-
-  return (
-
-    <div className="max-w-7xl mx-auto animate-in fade-in duration-300">
-
-      {/* Search & Filter Controls Bar */}
-      <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] border border-emerald-50 p-4 sm:p-6 mb-8 space-y-4">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          {/* Fast Search input */}
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input 
-              type="text"
-              placeholder="Buscar Placa ou Nº Chamado..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-slate-50 rounded-2xl outline-none font-bold text-sm text-slate-700 border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all placeholder-slate-400"
-            />
-          </div>
-
-          {/* Filter button */}
-          <div className="flex items-center gap-3 justify-between sm:justify-end">
-            <button
-              onClick={() => setShowChamadosFiltersModal(true)}
-              className={`px-4 py-3 rounded-2xl font-black text-xs flex items-center gap-2 transition-all active:scale-95 border ${
-                activeChamadosFiltersCount > 0
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 ring-2 ring-emerald-200'
-                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              <Filter size={18} className={activeChamadosFiltersCount > 0 ? 'text-emerald-600' : 'text-slate-500'} />
-              <span>Filtros</span>
-              {activeChamadosFiltersCount > 0 && (
-                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-black flex items-center justify-center">
-                  {activeChamadosFiltersCount}
-                </span>
-              )}
-            </button>
-
-            {activeChamadosFiltersCount > 0 && (
-              <button
-                onClick={clearChamadosFilters}
-                className="text-xs font-bold text-rose-500 hover:text-rose-700 underline px-1"
-              >
-                Limpar
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Modal de Filtros de Chamados */}
-      {showChamadosFiltersModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full sm:max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-6 bg-slate-50 border-b border-slate-100 flex justify-between items-center sticky top-0 z-10">
-              <div className="flex items-center gap-2">
-                <Filter size={20} className="text-emerald-600" />
-                <h3 className="text-lg font-black text-blue-950">Filtros de Chamados</h3>
-              </div>
-              <button onClick={() => setShowChamadosFiltersModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 overflow-y-auto flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Turno</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.turno} onChange={e => setFilters({...filters, turno: e.target.value})}>
-                  <option value="">Turno (Todos)</option><option>Manhã</option><option>Tarde</option><option>Noite</option><option>Linha Viva</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Tipo OP</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.tipoOp} onChange={e => setFilters({...filters, tipoOp: e.target.value})}>
-                  <option value="">Tipo OP (Todos)</option><option>TMA</option><option>Linha Viva</option><option>Linha Morta</option><option>SOC</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Sub Tipo</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.subTipo} onChange={e => setFilters({...filters, subTipo: e.target.value})}>
-                  <option value="">Sub Tipo (Todos)</option><option>Munk</option><option>Cesto Aéreo</option><option>Fiorino</option><option>Strada</option><option>Argo</option><option>Moto</option><option>Leve</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Sub Fluxo</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.subFluxo || ""} onChange={e => setFilters({...filters, subFluxo: e.target.value})}>
-                  <option value="">Sub Fluxo (Todos)</option><option value="COMPRAS">Em Compras</option><option value="FINANCEIRO">Em Financeiro</option><option value="PAGO">Pago</option>
-                </select>
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Etapa Workflow</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.etapa} onChange={e => setFilters({...filters, etapa: e.target.value})}>
-                  <option value="">Etapa Workflow (Todas)</option>
-                  <option value="Análise Frota">Análise Frota</option>
-                  <option value="Aguardando Desequipar">Aguardando Desequipar</option>
-                  <option value="Desequipado - Entrada Oficina">Desequipado (Entrada Oficina)</option>
-                  <option value="Oficina Interna">Oficina Interna</option>
-                  <option value="Oficina Externa">Oficina Externa</option>
-                  <option value="Liberado Operação">Liberado Operação</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-2">
-              <button onClick={clearChamadosFilters} className="flex-1 py-3 text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl font-black text-sm transition-colors">
-                Limpar Filtros
-              </button>
-              <button onClick={() => setShowChamadosFiltersModal(false)} className="flex-1 py-3 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl font-black text-sm transition-colors shadow-md shadow-emerald-600/20">
-                Aplicar Filtros
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-
-
-      <div className="grid grid-cols-1 gap-8">
-
-        {/* Chamados Impeditivos */}
-
-        <div className="bg-white rounded-[2rem] shadow-[0_8px_30px_rgba(0,0,0,0.04)] border border-emerald-50 overflow-hidden flex flex-col">
-
-          <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-
-            <h3 className="text-xl font-black text-blue-950 flex items-center gap-2"><AlertTriangle size={24} className="text-rose-500"/> Chamados Impeditivos</h3>
-
-            <span className="bg-rose-100 text-rose-700 px-3 py-1 rounded-full text-xs font-bold">{chamadosNormais.length} Veículos</span>
-
-          </div>
-
-          {renderWorkflowCardList(chamadosNormais, false)}
-
-        </div>
-
-
-
-        {/* Atenção (Não Impeditivos) */}
-
-        <div className="bg-white rounded-[2rem] shadow-[0_8px_30px_rgba(0,0,0,0.04)] border border-emerald-50 overflow-hidden flex flex-col">
-
-          <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-
-            <h3 className="text-xl font-black text-blue-950 flex items-center gap-2"><Eye size={24} className="text-amber-500"/> Atenção (Não Impeditivos)</h3>
-
-            <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-bold">{chamadosAtencao.length} Veículos</span>
-
-          </div>
-
-          {renderWorkflowCardList(chamadosAtencao, true)}
-
-        </div>
-      </div>
-    </div>
-  );
 }
 
 
@@ -10889,7 +10277,7 @@ function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
                       )}
 
                       {/* BOLINHAS DO SUB-FLUXO */}
-                      {step.id === 'Oficina Interna' && c.dadosWorkflow?.subFluxoOficina && (
+                      {step.id === 'Oficina Interna' && c.dadosWorkflow?.subFluxoOficina && ['COMPRAS', 'FINANCEIRO', 'PAGO'].includes(c.dadosWorkflow.subFluxoOficina.status) && (
                         <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 flex flex-col items-center z-50">
                           <div className="w-0.5 h-3 bg-slate-200 mb-1"></div>
                           <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${c.dadosWorkflow.subFluxoOficina.status === 'COMPRAS' ? 'bg-amber-500 text-white border-amber-500 ring-2 ring-amber-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
@@ -10991,30 +10379,77 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
     return LISTA_OFICINAS_PADRAO;
   }, [listaOficinas]);
 
-  const podeAlterarEtapaManual = userPermissions?.permissoes_edicao?.pode_alterar_etapa_manual === true || (currentUser?.perfil || '').toUpperCase() === 'ADMINISTRADOR' || currentUser?.isAdmin === true;
-  const podeAlterarSituacaoVeiculo = userPermissions?.permissoes_edicao?.pode_alterar_situacao_veiculo === true || (currentUser?.perfil || '').toUpperCase() === 'ADMINISTRADOR' || currentUser?.isAdmin === true;
+  const setorKey = normalizeKey(currentUser?.setor || '');
+  const perfilKey = normalizeKey(currentUser?.perfil || '');
+  const setorNorm = (currentUser?.setor || '').trim().toUpperCase();
+  const perfilNorm = (currentUser?.perfil || '').trim().toUpperCase();
+  const isCompras = setorKey === 'COMPRAS' || setorNorm === 'COMPRAS';
+  const isFinanceiro = setorKey === 'FINANCEIRO' || setorNorm === 'FINANCEIRO';
+  const isAdminOrGerente = ['ADMINISTRADOR', 'ADMIN', 'GERENTE', 'GERENCIA', 'DIRETOR', 'DIRETORIA'].some(p => perfilKey.includes(p)) || currentUser?.isAdmin === true;
+  const isCoord = perfilKey.includes('COORDENAD') || perfilNorm === 'COORDENADOR';
 
-  // Buscador de 100% dos detalhes sob demanda (fotos, historico, comentarios, workflows) ao abrir o chamado
+  const podeAlterarEtapaManual = userPermissions?.permissoes_edicao?.pode_alterar_etapa_manual === true || isAdminOrGerente;
+  const podeAlterarDadosPrincipaisChamado = userPermissions?.permissoes_edicao?.pode_alterar_dados_principais_chamado === true || isAdminOrGerente;
+  const podeAlterarSituacaoOperacional = userPermissions?.permissoes_edicao?.pode_alterar_situacao_veiculo === true || isAdminOrGerente;
+
+  // Buscador de 100% dos detalhes sob demanda (fotos, historico da tabela relacional, comentarios, workflows) ao abrir o chamado
   useEffect(() => {
     if (chamadoEdicao && chamadoEdicao.id) {
-      supabase
-        .from('chamados')
-        .select('*')
-        .eq('id', chamadoEdicao.id)
-        .maybeSingle()
-        .then(({ data, error }) => {
-          if (data && !error) {
-            setFormData(prev => ({
-              ...prev,
-              ...data,
-              hodometro: data.dadosWorkflow?.hodometro || data.hodometro || prev.hodometro || '',
-              fotosChamado: data.dadosWorkflow?.fotosChamado || data.fotosChamado || prev.fotosChamado || {},
-              dataAbertura: formatToDatetimeLocal(data.dataAbertura || prev.dataAbertura),
-              dadosWorkflow: data.dadosWorkflow || prev.dadosWorkflow || {},
-              historicoModificacoes: data.historicoModificacoes || prev.historicoModificacoes || []
-            }));
-          }
-        });
+      Promise.all([
+        supabase.from('chamados').select('*').eq('id', chamadoEdicao.id).maybeSingle(),
+        supabase.from('chamados_historico').select('*').eq('chamado_id', chamadoEdicao.id).order('data_hora', { ascending: false })
+      ]).then(([{ data: cData, error: cErr }, { data: hData }]) => {
+        if (cData && !cErr) {
+          const toIso = (dt) => { 
+            try { 
+              const d = new Date(dt); 
+              return isNaN(d.getTime()) ? String(dt) : d.toISOString(); 
+            } catch(e) { 
+              return String(dt); 
+            } 
+          };
+
+          const mapHistorico = new Map();
+          (hData || []).forEach(l => {
+            const iso = toIso(l.data_hora);
+            const desc = (l.descricao || '').trim();
+            const key = `${iso}_${desc}`;
+            mapHistorico.set(key, {
+              id: l.id,
+              dataHora: l.data_hora,
+              usuario: l.usuario,
+              descricao: l.descricao
+            });
+          });
+
+          (cData.historicoModificacoes || []).forEach(l => {
+            const rawDt = l.dataHora || l.data_hora || l.data;
+            const iso = toIso(rawDt);
+            const desc = (l.descricao || l.detalhes || '').trim();
+            const key = `${iso}_${desc}`;
+            if (!mapHistorico.has(key)) {
+              mapHistorico.set(key, {
+                id: l.id || Date.now() + Math.random(),
+                dataHora: rawDt,
+                usuario: l.usuario || l.criadoPor || 'Sistema',
+                descricao: desc
+              });
+            }
+          });
+
+          const logsUnificados = Array.from(mapHistorico.values()).sort((a, b) => new Date(b.dataHora || 0) - new Date(a.dataHora || 0));
+
+          setFormData(prev => ({
+            ...prev,
+            ...cData,
+            hodometro: cData.hodometro !== null && cData.hodometro !== undefined ? String(cData.hodometro) : (cData.dadosWorkflow?.hodometro || prev.hodometro || ''),
+            fotosChamado: cData.dadosWorkflow?.fotosChamado || cData.fotosChamado || prev.fotosChamado || {},
+            dataAbertura: formatToDatetimeLocal(cData.dataAbertura || prev.dataAbertura),
+            dadosWorkflow: cData.dadosWorkflow || prev.dadosWorkflow || {},
+            historicoModificacoes: logsUnificados
+          }));
+        }
+      });
     }
   }, [chamadoEdicao]);
 
@@ -11079,14 +10514,6 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   const [modalTransferenciaExternaOpen, setModalTransferenciaExternaOpen] = useState(false);
   const [oficinaDestinoExterna, setOficinaDestinoExterna] = useState('');
   const [motivoTransferenciaExterna, setMotivoTransferenciaExterna] = useState('');
-  const setorKey = normalizeKey(currentUser?.setor || '');
-  const perfilKey = normalizeKey(currentUser?.perfil || '');
-  const setorNorm = (currentUser?.setor || '').trim().toUpperCase();
-  const perfilNorm = (currentUser?.perfil || '').trim().toUpperCase();
-  const isCompras = setorKey === 'COMPRAS' || setorNorm === 'COMPRAS';
-  const isFinanceiro = setorKey === 'FINANCEIRO' || setorNorm === 'FINANCEIRO';
-  const isAdminOrGerente = ['ADMINISTRADOR', 'ADMIN', 'GERENTE', 'GERENCIA', 'DIRETOR', 'DIRETORIA'].some(p => perfilKey.includes(p)) || currentUser?.isAdmin === true;
-  const isCoord = perfilKey.includes('COORDENAD') || perfilNorm === 'COORDENADOR';
   const subFluxo = formData.dadosWorkflow?.subFluxoOficina;
 
   const [transitionComment, setTransitionComment] = useState('');
@@ -11198,14 +10625,27 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
   const handleSubFluxoAction = (newStatus, extrasDesc = '', additionalData = {}) => {
     const atual = formData.dadosWorkflow?.subFluxoOficina || {};
-    const novoSubFluxo = { ...atual, status: newStatus, ...additionalData };
+    const { dadosWorkflow: _ignorar, ...cleanAdditional } = additionalData;
+    const novoSubFluxo = { ...atual, status: newStatus, ...cleanAdditional };
     
     if (onWorkflowTransition && isEditing) {
       let finalDesc = `Sub-fluxo Oficina atualizado para: ${newStatus}. ${extrasDesc}`;
       if (transitionComment.trim()) {
         finalDesc += ` (Obs: ${transitionComment.trim()})`;
       }
-      onWorkflowTransition(formData.id, formData.etapaWorkflow, finalDesc, { dadosWorkflow: { subFluxoOficina: novoSubFluxo } });
+
+      const payloadExtras = {
+        sub_fluxo_status: newStatus,
+        pedido_compras: cleanAdditional.pedidoCompras || formData.pedido_compras || atual.pedidoCompras || null,
+        observacao_compras: cleanAdditional.observacaoCompras || formData.observacao_compras || atual.observacaoCompras || null,
+        data_envio_compras: cleanAdditional.dataEnvioCompras || formData.data_envio_compras || atual.dataEnvioCompras || null,
+        dadosWorkflow: {
+          ...(formData.dadosWorkflow || {}),
+          subFluxoOficina: novoSubFluxo
+        }
+      };
+
+      onWorkflowTransition(formData.id, formData.etapaWorkflow, finalDesc, payloadExtras);
       setTransitionComment('');
     }
   };
@@ -11846,7 +11286,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                     )}
 
                     {/* BOLINHAS DO SUB-FLUXO */}
-                    {step.id === 'Oficina Interna' && subFluxo && (
+                    {step.id === 'Oficina Interna' && subFluxo && ['COMPRAS', 'FINANCEIRO', 'PAGO'].includes(subFluxo.status) && (
                       <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 flex flex-col items-center">
                         <div className="w-0.5 h-4 bg-slate-200 -mt-3 mb-1"></div>
                         <div className={`w-5 h-5 rounded-full flex items-center justify-center mb-1 shadow-sm ${subFluxo.status === 'COMPRAS' ? 'bg-amber-500 text-white animate-pulse ring-2 ring-amber-200' : 'bg-emerald-500 text-white'}`}>
@@ -11912,6 +11352,32 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                 const temDefeitoInvalido = formData.defeitos?.some(d => !d.categoria || !d.numeroSolicitacao);
                 if (temDefeitoInvalido) return alert('A Categoria e o Nº SOL (E-CAR) são obrigatórios para todos os defeitos.');
 
+                if (!isEditing) {
+                  const openTicket = (rawChamados || []).find(c => (c.placa || '').trim().toUpperCase() === (formData.placa || '').trim().toUpperCase() && c.status !== 'RESOLVIDO');
+                  if (openTicket) {
+                    let legacyDefeitos = openTicket.defeitos;
+                    if (!legacyDefeitos || legacyDefeitos.length === 0) {
+                      if (openTicket.defeitoPrincipal || openTicket.defeitoEncontrado) {
+                        legacyDefeitos = [{
+                          id: Date.now(),
+                          descricao: openTicket.defeitoEncontrado || 'Sem descrição',
+                          categoria: openTicket.defeitoPrincipal || 'Outros',
+                          isImpeditivo: true,
+                          status: 'PENDENTE',
+                          numeroSolicitacao: openTicket.numero || ''
+                        }];
+                      }
+                    }
+                    setDuplicidadeChamado({ ...openTicket, defeitos: legacyDefeitos || [] });
+                    setModalDuplicidadeStep(1);
+                    setEscalonamentoMotivo('');
+                    setNovoDefeitoDescricao(formData.defeitos && formData.defeitos[0]?.descricao || '');
+                    setNovoDefeitoCategoria(formData.defeitos && formData.defeitos[0]?.categoria || '');
+                    setNovoDefeitoECar(formData.defeitos && formData.defeitos[0]?.numeroSolicitacao || '');
+                    return;
+                  }
+                }
+
                 const finalMotorista = formData.motorista === 'OUTRO' ? formData.motoristaOutro : formData.motorista;
                 
                 const { motoristaOutro, fotosChamado, ...dadosSemCamposVirtuais } = formData;
@@ -11942,8 +11408,8 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                 <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
                 Placa do Veículo <span className="text-rose-500">*</span>
               </label>
-              {isFrota && isEditing ? (
-                <input disabled value={formData.placa} className="w-full min-h-[48px] p-3.5 bg-slate-100 rounded-2xl font-black text-slate-600 outline-none border border-slate-200 cursor-not-allowed text-sm" />
+              {isEditing && !podeAlterarDadosPrincipaisChamado ? (
+                <input disabled value={formData.placa} className="w-full min-h-[48px] p-3.5 bg-slate-100 rounded-2xl font-black text-slate-500 outline-none border border-slate-200 cursor-not-allowed text-sm" />
               ) : (
                 <SearchableSelect options={activeVehicles} value={formData.placa} onChange={handlePlacaChange} className="w-full min-h-[48px] p-3.5 bg-slate-50 rounded-2xl font-black text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500 border border-slate-200 text-sm shadow-xs" placeholder="Buscar ou selecionar placa..." />
               )}
@@ -11955,7 +11421,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                 Situação Veículo <span className="text-rose-500">*</span>
               </label>
               <select 
-                disabled={isEditing && !podeAlterarSituacaoVeiculo} 
+                disabled={isEditing && !podeAlterarSituacaoOperacional} 
                 value={formData.situacaoVeiculo} 
                 onChange={e => setFormData({...formData, situacaoVeiculo: e.target.value})} 
                 className="w-full min-h-[48px] p-3.5 bg-slate-50 rounded-2xl font-bold text-slate-800 outline-none border border-slate-200 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed text-sm shadow-xs"
@@ -11974,7 +11440,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                 type="number" 
                 required
                 placeholder="Ex: 125000" 
-                disabled={isFrota && isEditing} 
+                disabled={isEditing && !podeAlterarSituacaoOperacional} 
                 value={formData.hodometro || ''} 
                 onChange={e => setFormData({...formData, hodometro: e.target.value})} 
                 className="w-full min-h-[48px] p-3.5 bg-slate-50 rounded-2xl font-bold text-slate-800 outline-none border border-slate-200 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed text-sm shadow-xs" 
@@ -11988,7 +11454,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
               </label>
               <input 
                 required 
-                disabled={isFrota && isEditing} 
+                disabled={isEditing && !podeAlterarDadosPrincipaisChamado} 
                 type="datetime-local" 
                 value={formData.dataAbertura} 
                 onChange={e => setFormData({...formData, dataAbertura: e.target.value})} 
@@ -12001,8 +11467,8 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
               <label className="block text-[11px] font-black uppercase text-slate-500 mb-1.5">
                 Motorista / Colaborador <span className="text-rose-500">*</span>
               </label>
-              {isFrota && isEditing ? (
-                <input disabled value={formData.motorista || '-'} className="w-full min-h-[48px] p-3.5 bg-slate-100 rounded-2xl font-bold text-slate-600 outline-none border border-slate-200 cursor-not-allowed text-sm" />
+              {isEditing && !podeAlterarSituacaoOperacional ? (
+                <input disabled value={formData.motorista || '-'} className="w-full min-h-[48px] p-3.5 bg-slate-100 rounded-2xl font-bold text-slate-500 outline-none border border-slate-200 cursor-not-allowed text-sm" />
               ) : (
                 <div className="space-y-2">
                   <SearchableSelect options={activeColabs} value={formData.motorista || ''} onChange={val => setFormData({...formData, motorista: val})} className="w-full min-h-[48px] p-3.5 bg-slate-50 rounded-2xl font-bold text-slate-800 outline-none border border-slate-200 focus:ring-2 focus:ring-emerald-500 text-sm shadow-xs" placeholder="Selecione o motorista..." />
@@ -12435,26 +11901,21 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
               <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4 flex items-center gap-1.5"><History size={12}/> Histórico do Fluxo</h4>
 
-              <div className="space-y-3 max-h-[150px] overflow-y-auto pr-2">
-
-                {formData.historicoModificacoes.map((log, index) => (
-
-                  <div key={log.id || index} className="flex gap-3 text-xs">
-
-                    <div className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0 mt-1.5"></div>
-
-                    <div>
-
-                      <p className="font-bold text-slate-700">{log.descricao}</p>
-
-                      <p className="text-[10px] text-slate-400 font-bold mt-0.5">{formatarDataBR(log.dataHora)} por {log.usuario}</p>
-
+              <div className="space-y-3 max-h-[180px] overflow-y-auto pr-2">
+                {formData.historicoModificacoes.map((log, index) => {
+                  const dataLog = log.dataHora || log.data_hora || log.data;
+                  const descLog = log.descricao || log.detalhes || 'Ação registrada';
+                  const userLog = log.usuario || log.criadoPor || log.user || 'Sistema';
+                  return (
+                    <div key={log.id || index} className="flex gap-3 text-xs">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 mt-1.5"></div>
+                      <div>
+                        <p className="font-bold text-slate-700">{formatarTextoLog(descLog)}</p>
+                        <p className="text-[10px] text-slate-400 font-bold mt-0.5">{formatarDataBR(dataLog)} por {userLog}</p>
+                      </div>
                     </div>
-
-                  </div>
-
-                ))}
-
+                  );
+                })}
               </div>
 
             </div>
@@ -12686,13 +12147,31 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                     <div className="mt-4 p-4 bg-white border border-slate-200 rounded-xl space-y-4">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Sub-Fluxo Financeiro/Compras</span>
-                        <span className={`text-[10px] font-black px-2 py-1 rounded-md uppercase ${!subFluxo ? 'bg-slate-100 text-slate-500' : subFluxo.status === 'COMPRAS' ? 'bg-amber-100 text-amber-700' : subFluxo.status === 'FINANCEIRO' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-                          {subFluxo?.status || 'NÃO INICIADO'}
+                        <span className={`text-[10px] font-black px-2 py-1 rounded-md uppercase ${
+                          !subFluxo || !subFluxo.status || subFluxo.status === 'OFICINA_INTERNA' || subFluxo.status === 'NÃO INICIADO' || !subFluxo.pedidoCompras
+                            ? 'bg-slate-100 text-slate-500'
+                            : subFluxo.status === 'COMPRAS'
+                            ? 'bg-amber-100 text-amber-700'
+                            : subFluxo.status === 'FINANCEIRO'
+                            ? 'bg-blue-100 text-blue-700'
+                            : subFluxo.status === 'PAGO'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {!subFluxo || !subFluxo.status || subFluxo.status === 'OFICINA_INTERNA' || subFluxo.status === 'NÃO INICIADO' || !subFluxo.pedidoCompras
+                            ? 'NÃO INICIADO'
+                            : subFluxo.status === 'COMPRAS'
+                            ? 'AGUARDANDO COMPRAS'
+                            : subFluxo.status === 'FINANCEIRO'
+                            ? 'AGUARDANDO FINANCEIRO'
+                            : subFluxo.status === 'PAGO'
+                            ? 'PAGO / CONCLUÍDO'
+                            : subFluxo.status}
                         </span>
                       </div>
 
                       {/* STEP 1: ENVIAR PARA COMPRAS (FROTA/ADMIN) */}
-                      {(!subFluxo || subFluxo.status !== 'PAGO' || isAdminOrGerente) && (isFrota || isAdminOrGerente) && (!subFluxo || isAdminOrGerente) && (
+                      {(!subFluxo || !subFluxo.pedidoCompras || subFluxo.status !== 'PAGO' || isAdminOrGerente) && (isFrota || isAdminOrGerente) && (
                          <div className="space-y-3 p-3 bg-amber-50 rounded-lg border border-amber-100">
                            {subFluxo?.pedidoCompras ? (
                              <div>
@@ -12718,7 +12197,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                                  <textarea value={comprasObservacao} onChange={e=>setComprasObservacao(e.target.value)} placeholder="Comentários adicionais..." className="w-full p-2 rounded-lg text-xs border border-amber-200 outline-none resize-none h-16"></textarea>
                                </div>
                                <button 
-                                 onClick={() => handleSubFluxoAction('COMPRAS', `Pedido: ${comprasPedido}${comprasObservacao ? ' | Obs: ' + comprasObservacao : ''}`, { dadosWorkflow: { subFluxoOficina: { ...subFluxo, status: 'COMPRAS', pedidoCompras: comprasPedido, dataEnvioCompras: new Date().toISOString(), observacaoCompras: comprasObservacao } } })}
+                                 onClick={() => handleSubFluxoAction('COMPRAS', `Pedido: ${comprasPedido}${comprasObservacao ? ' | Obs: ' + comprasObservacao : ''}`, { dadosWorkflow: { subFluxoOficina: { ...(subFluxo || {}), status: 'COMPRAS', pedidoCompras: comprasPedido, dataEnvioCompras: new Date().toISOString(), observacaoCompras: comprasObservacao } } })}
                                  disabled={!comprasPedido}
                                  className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm rounded-lg disabled:opacity-50 transition-colors"
                                >

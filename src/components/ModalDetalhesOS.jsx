@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Clock, Navigation, MapPin, CheckCircle2, Zap, FileText, Download, List, AlertTriangle, RotateCcw } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { WFMToastList, WFMConfirmModal } from './WFMToast';
 
 const buildCleanOrFilter = (osObj, targetOsId) => {
   const parts = [];
@@ -35,6 +36,34 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
   const [selectedAuditor, setSelectedAuditor] = React.useState(os?.auditor || '');
   const [isAssigning, setIsAssigning] = React.useState(false);
   const [liveLogs, setLiveLogs] = useState([]);
+  const [toasts, setToasts] = useState([]);
+  const [confirmModal, setConfirmModal] = useState(null);
+
+  const addToast = (message, type = 'success', title = '') => {
+    const id = Date.now() + Math.random().toString();
+    const defaultTitle = type === 'success' ? 'Sucesso' : (type === 'error' ? 'Erro' : (type === 'warning' ? 'Atenção' : 'Informação'));
+    setToasts(prev => [...prev, { id, message, type, title: title || defaultTitle }]);
+  };
+
+  const removeToast = (id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const askConfirm = ({ title, message, confirmText, cancelText, variant, onConfirm }) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      confirmText: confirmText || 'Confirmar',
+      cancelText: cancelText || 'Cancelar',
+      variant: variant || 'danger',
+      onConfirm: () => {
+        setConfirmModal(null);
+        if (onConfirm) onConfirm();
+      },
+      onCancel: () => setConfirmModal(null)
+    });
+  };
 
   // Resolve properties with cross-table hydration
   const isWfmTask = !!os.payload_dados;
@@ -84,6 +113,21 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
           inspTasks.forEach(i => {
             if (Array.isArray(i.historico)) logs.push(...i.historico);
           });
+        }
+
+        // 4. Fetch from autofiscalizacao_field_audits (keyed by inspid)
+        const targetInspId = os.inspid || os.id_origem || (inspecoes.find(i => i.osid === osId)?.inspid);
+        if (targetInspId) {
+          const { data: faTasks } = await supabase
+            .from('autofiscalizacao_field_audits')
+            .select('historico')
+            .eq('inspid', targetInspId);
+
+          if (faTasks) {
+            faTasks.forEach(f => {
+              if (Array.isArray(f.historico)) logs.push(...f.historico);
+            });
+          }
         }
 
         setLiveLogs(logs);
@@ -314,30 +358,35 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
           <div className="flex items-center gap-2">
             {auditorName && status !== 'completed' && status !== 'concluido' && (
               <button
-                onClick={async () => {
-                  if (confirm(`Deseja devolver a OS ${osId} para a Base de Origem (${base})?`)) {
-                    const logMsg = `OS Devolvida Manualmente para a Base de Origem (${base})`;
-                    await supabase.from('wfm_tarefas').update({
-                      auditor: null,
-                      assigned_date: null,
-                      planned_start: null,
-                      planned_end: null,
-                      status: 'pending',
-                      historico: [
-                        ...(os.historico || []),
-                        { acao: 'WFM_DESALOCACAO', usuario: 'Operador', timestamp: new Date().toISOString(), observacao: logMsg }
-                      ]
-                    }).or(buildCleanOrFilter(os, osId));
+                onClick={() => {
+                  askConfirm({
+                    title: 'Devolver OS para Base',
+                    message: `Deseja realmente devolver a OS ${osId} para a Base de Origem (${base})?`,
+                    confirmText: `Devolver para ${base}`,
+                    variant: 'warning',
+                    onConfirm: async () => {
+                      const logMsg = `OS Devolvida Manualmente para a Base de Origem (${base})`;
+                      await supabase.from('wfm_tarefas').update({
+                        auditor: null,
+                        assigned_date: null,
+                        planned_start: null,
+                        planned_end: null,
+                        status: 'pending',
+                        historico: [
+                          ...(os.historico || []),
+                          { acao: 'WFM_DESALOCACAO', usuario: 'Operador', timestamp: new Date().toISOString(), observacao: logMsg }
+                        ]
+                      }).or(buildCleanOrFilter(os, osId));
 
-                    await supabase.from('autofiscalizacao_workflows').update({
-                      auditor: null,
-                      status: 'pendente'
-                    }).eq('osid', osId);
+                      await supabase.from('autofiscalizacao_workflows').update({
+                        auditor: null,
+                        status: 'pendente'
+                      }).eq('osid', osId);
 
-                    alert(`OS ${osId} devolvida com sucesso para a ${base}!`);
-                    onClose();
-                    if (window.location) window.location.reload();
-                  }
+                      addToast(`OS ${osId} devolvida com sucesso para a ${base}!`, 'success');
+                      setTimeout(() => onClose(), 800);
+                    }
+                  });
                 }}
                 className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-[10px] rounded-xl uppercase tracking-wider shadow-sm flex items-center gap-1.5 active:scale-95 transition-all"
               >
@@ -532,19 +581,25 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
 
             {auditorName && status !== 'completed' && status !== 'concluido' && onAssignAudit && (
               <button 
-                onClick={async () => {
-                  if (confirm('Deseja realmente DESPROGRAMAR esta OS do auditor?')) {
-                    setIsAssigning(true);
-                    try {
-                      await onAssignAudit(os, '', null, null);
-                      alert('OS desprogramada e devolvida ao Bucket com sucesso!');
-                    } catch(e) {
-                      alert('Erro ao desprogramar: ' + e.message);
-                    } finally {
-                      setIsAssigning(false);
-                      onClose();
+                onClick={() => {
+                  askConfirm({
+                    title: 'Desprogramar OS',
+                    message: 'Deseja realmente DESPROGRAMAR esta OS do auditor? A OS retornará para a fila de pendências do Bucket.',
+                    confirmText: 'Desprogramar OS',
+                    variant: 'danger',
+                    onConfirm: async () => {
+                      setIsAssigning(true);
+                      try {
+                        await onAssignAudit(os, '', null, null);
+                        addToast('OS desprogramada e devolvida ao Bucket com sucesso!', 'success');
+                        setTimeout(() => onClose(), 800);
+                      } catch(e) {
+                        addToast('Erro ao desprogramar: ' + e.message, 'error');
+                      } finally {
+                        setIsAssigning(false);
+                      }
                     }
-                  }
+                  });
                 }}
                 className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-all"
               >
@@ -572,10 +627,11 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
                     setIsAssigning(true);
                     try {
                       await onAssignAudit(os, selectedAuditor, null, null);
-                      alert(selectedAuditor ? `OS alocada com sucesso para ${selectedAuditor}!` : 'OS desalocada!');
+                      addToast(selectedAuditor ? `OS alocada com sucesso para ${selectedAuditor}!` : 'OS desalocada!', 'success');
+                      setTimeout(() => onClose(), 800);
                     } catch (err) {
                       console.error(err);
-                      alert('Erro ao alocar auditor: ' + err.message);
+                      addToast('Erro ao alocar auditor: ' + err.message, 'error');
                     } finally {
                       setIsAssigning(false);
                     }
@@ -591,6 +647,10 @@ export default function ModalDetalhesOS({ os, onClose, ordens = [], inspecoes = 
           <button onClick={onClose} className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl shadow-md">Fechar</button>
         </div>
       </div>
+
+      {/* ── TOAST NOTIFICATIONS & CONFIRM DIALOG ── */}
+      <WFMToastList toasts={toasts} onDismiss={removeToast} />
+      {confirmModal && <WFMConfirmModal {...confirmModal} />}
     </div>
   );
 }

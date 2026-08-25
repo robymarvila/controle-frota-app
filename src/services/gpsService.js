@@ -1,8 +1,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { supabase } from '../supabaseClient';
-
-const FleetLocation = registerPlugin('FleetLocation');
+import FleetLocation from './fleetLocationPlugin';
 const BackgroundGeolocation = registerPlugin('BackgroundGeolocation');
 
 const SUPABASE_URL = 'https://dbamnuezlbmmxhxpxtiu.supabase.co';

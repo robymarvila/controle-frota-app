@@ -2,7 +2,7 @@ import React from 'react';
 import {
   Home, LayoutDashboard, CalendarCheck, History,
   Wrench, CarFront, Activity, ShieldCheck,
-  FileSignature, MapPin,
+  FileSignature, MapPin, UserCheck,
   ClipboardCheck, Briefcase, Users,
   Lock, User, LogOut, Sparkles, Sun, Moon,
   ChevronRight
@@ -24,6 +24,7 @@ const categoryModules = {
   fiscalizacao: [
     { id: 'autofiscalizacao', icon: FileSignature, title: 'AutoFiscalização', subtitle: 'Fiscalização em campo', gradient: 'linear-gradient(135deg, #ecfdf5, #d1fae5)', color: '#059669', permKey: 'autofiscalizacao' },
     { id: 'wfm_despacho', icon: MapPin, title: 'WFM / Despacho', subtitle: 'Gestão de equipes em campo', gradient: 'linear-gradient(135deg, #eff6ff, #dbeafe)', color: '#2563eb', permKey: 'wfm_despacho' },
+    { id: 'status_auditores', icon: UserCheck, title: 'Status Auditores', subtitle: 'A vida do auditor e trajetos', gradient: 'linear-gradient(135deg, #f5f3ff, #ede9fe)', color: '#7c3aed', permKey: 'status_auditores' },
   ],
   operacao: [
     { id: 'entrega_equipes', icon: ClipboardCheck, title: 'Entrega Equipes', subtitle: 'Controle de entrega', gradient: 'linear-gradient(135deg, #ecfdf5, #d1fae5)', color: '#059669', permKey: 'entrega_equipes' },

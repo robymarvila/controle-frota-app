@@ -41,6 +41,24 @@ const getListaOficinasAtualizada = () => {
   return LISTA_OFICINAS_BASE;
 };
 
+const formatarTextoLog = (texto) => {
+  if (!texto || typeof texto !== 'string') return texto || '';
+  return texto.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:\+\d{2}:\d{2}|Z)?\b/g, (match) => {
+    try {
+      const d = new Date(match);
+      if (!isNaN(d.getTime())) {
+        const dia = String(d.getDate()).padStart(2, '0');
+        const mes = String(d.getMonth() + 1).padStart(2, '0');
+        const ano = d.getFullYear();
+        const horas = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return `${dia}/${mes}/${ano} ${horas}:${min}`;
+      }
+    } catch (e) {}
+    return match;
+  });
+};
+
 export default function MecanicoView({ chamados, vehicles, onWorkflowTransition, onSubmit, currentUser, listaOficinas }) {
   const [activeTab, setActiveTab] = useState('ANALISE'); // 'ANALISE', 'INTERNA', 'USUARIO'
   const [activeType, setActiveType] = useState('TODOS');
@@ -138,21 +156,60 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
     setNovoComentario('');
 
     try {
-      const { data, error } = await supabase
-        .from('chamados')
-        .select('*')
-        .eq('id', chamado.id)
-        .maybeSingle();
+      const [{ data, error }, { data: hData }] = await Promise.all([
+        supabase.from('chamados').select('*').eq('id', chamado.id).maybeSingle(),
+        supabase.from('chamados_historico').select('*').eq('chamado_id', chamado.id).order('data_hora', { ascending: false })
+      ]);
 
       if (data && !error) {
+        const toIso = (dt) => { 
+          try { 
+            const d = new Date(dt); 
+            return isNaN(d.getTime()) ? String(dt) : d.toISOString(); 
+          } catch(e) { 
+            return String(dt); 
+          } 
+        };
+
+        const mapHistorico = new Map();
+        (hData || []).forEach(l => {
+          const iso = toIso(l.data_hora);
+          const desc = (l.descricao || '').trim();
+          const key = `${iso}_${desc}`;
+          mapHistorico.set(key, {
+            id: l.id,
+            dataHora: l.data_hora,
+            usuario: l.usuario,
+            descricao: l.descricao
+          });
+        });
+
+        (data.historicoModificacoes || []).forEach(l => {
+          const rawDt = l.dataHora || l.data_hora || l.data;
+          const iso = toIso(rawDt);
+          const desc = (l.descricao || l.detalhes || '').trim();
+          const key = `${iso}_${desc}`;
+          if (!mapHistorico.has(key)) {
+            mapHistorico.set(key, {
+              id: l.id || Date.now() + Math.random(),
+              dataHora: rawDt,
+              usuario: l.usuario || l.criadoPor || 'Sistema',
+              descricao: desc
+            });
+          }
+        });
+
+        const logsUnificados = Array.from(mapHistorico.values()).sort((a, b) => new Date(b.dataHora || 0) - new Date(a.dataHora || 0));
+
         setDetailChamado(prev => {
           if (prev && prev.id === chamado.id) {
             return {
               ...prev,
               ...data,
+              hodometro: data.hodometro !== null && data.hodometro !== undefined ? data.hodometro : (data.dadosWorkflow?.hodometro || prev.hodometro),
               fotosChamado: data.dadosWorkflow?.fotosChamado || data.fotosChamado || {},
               defeitos: data.defeitos || [],
-              historicoModificacoes: data.historicoModificacoes || []
+              historicoModificacoes: logsUnificados
             };
           }
           return prev;
@@ -166,9 +223,23 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
   const handleAddComment = () => {
     if (!novoComentario.trim()) return;
     const log = `Comentário do Mecânico: ${novoComentario.trim()}`;
+    const dataHoraIso = new Date().toISOString();
+    const usuarioNome = currentUser?.nome || 'Mecânico';
+
+    supabase
+      .from('chamados_historico')
+      .insert([{
+        chamado_id: detailChamado.id,
+        data_hora: dataHoraIso,
+        usuario: usuarioNome,
+        acao: 'COMENTÁRIO',
+        descricao: log
+      }])
+      .then(() => {}, err => console.error('Erro ao salvar em chamados_historico:', err));
+
     const updated = {
       ...detailChamado,
-      historicoModificacoes: [{ id: Date.now(), dataHora: new Date().toISOString(), usuario: currentUser?.nome || 'Mecânico', descricao: log }, ...(detailChamado.historicoModificacoes || [])]
+      historicoModificacoes: [{ id: Date.now(), dataHora: dataHoraIso, usuario: usuarioNome, descricao: log }, ...(detailChamado.historicoModificacoes || [])]
     };
     onSubmit(updated);
     setDetailChamado(updated);
@@ -765,6 +836,10 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Data Abertura</p>
                     <p className="text-sm font-black text-slate-800 mt-0.5">{detailChamado.dataAbertura ? new Date(detailChamado.dataAbertura).toLocaleDateString('pt-BR') : '--'}</p>
                   </div>
+                  <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Hodômetro</p>
+                    <p className="text-sm font-black text-slate-800 font-mono mt-0.5">{detailChamado.hodometro || detailChamado.dadosWorkflow?.hodometro ? `${Number(detailChamado.hodometro || detailChamado.dadosWorkflow?.hodometro).toLocaleString('pt-BR')} km` : '--'}</p>
+                  </div>
                   {detailChamado.motorista && (
                     <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100 col-span-2">
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Motorista</p>
@@ -898,7 +973,7 @@ export default function MecanicoView({ chamados, vehicles, onWorkflowTransition,
                           {i < historico.length - 1 && <div className="w-px flex-1 bg-slate-200 mt-1" />}
                         </div>
                         <div className="pb-4">
-                          <p className="font-bold text-slate-700">{h.descricao}</p>
+                          <p className="font-bold text-slate-700">{formatarTextoLog(h.descricao)}</p>
                           <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-wider">
                             {h.usuario} • {new Date(h.dataHora).toLocaleDateString('pt-BR')} {new Date(h.dataHora).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'})}
                           </p>
