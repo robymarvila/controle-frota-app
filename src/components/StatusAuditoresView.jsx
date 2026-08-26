@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  Users, 
+  Users,
+  ArrowLeft, 
   Calendar, 
   Clock, 
   CheckCircle2, 
@@ -39,20 +40,28 @@ import ModalAuditoriaDispositivo from './ModalAuditoriaDispositivo';
 import ModalHabilitarEscala from './ModalHabilitarEscala';
 import ModalJustificarOcorrencia from './ModalJustificarOcorrencia';
 
-export default function StatusAuditoresView({ currentUser, activeRegional = 'Todas' }) {
+export default function StatusAuditoresView({ currentUser, activeRegional = 'Todas', initialAuditor = null, initialDate = null }) {
   // 1. Estados de Filtro de Data
   const [selectedDate, setSelectedDate] = useState(() => {
+    if (initialDate) return initialDate;
     const d = new Date();
     return d.toISOString().split('T')[0];
   });
   const [selectedMonth, setSelectedMonth] = useState(() => {
+    if (initialDate && initialDate.length >= 7) return initialDate.slice(0, 7);
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
 
   // 2. Estados Principais de Dados
   const [auditors, setAuditors] = useState([]);
-  const [selectedAuditor, setSelectedAuditor] = useState(null);
+  const [selectedAuditor, setSelectedAuditor] = useState(initialAuditor || null);
+
+  useEffect(() => {
+    if (initialAuditor) {
+      setSelectedAuditor(initialAuditor);
+    }
+  }, [initialAuditor]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('TODOS'); // TODOS, ONLINE, MEAL, OFFLINE, SEM_ESCALA
 
@@ -298,9 +307,12 @@ export default function StatusAuditoresView({ currentUser, activeRegional = 'Tod
 
   // 10. Grade do Calendário Mensal
   const calendarDays = useMemo(() => {
-    const [yearStr, monthStr] = selectedMonth.split('-');
-    const year = parseInt(yearStr, 10);
-    const month = parseInt(monthStr, 10) - 1;
+    const safeMonth = selectedMonth || new Date().toISOString().slice(0, 7);
+    const parts = safeMonth.includes('-') ? safeMonth.split('-') : new Date().toISOString().slice(0, 7).split('-');
+    const yearStr = parts[0];
+    const monthStr = parts[1];
+    const year = parseInt(yearStr, 10) || new Date().getFullYear();
+    const month = (parseInt(monthStr, 10) || (new Date().getMonth() + 1)) - 1;
 
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
@@ -448,7 +460,7 @@ export default function StatusAuditoresView({ currentUser, activeRegional = 'Tod
       {/* 2. Grid Principal (Painel Lateral de Roster + Área Central de Detalhes) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* 2.1 Coluna Lateral: Lista / Roster de Auditores (lg:col-span-4) */}
-        <div className="lg:col-span-4 bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex flex-col gap-4">
+        <div className={`lg:col-span-4 bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex flex-col gap-4 ${selectedAuditor ? 'hidden lg:flex' : 'flex'}`}>
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-black text-slate-900 flex items-center gap-2">
               <Users size={16} className="text-blue-600" />
@@ -549,9 +561,18 @@ export default function StatusAuditoresView({ currentUser, activeRegional = 'Tod
         </div>
 
         {/* 2.2 Coluna Principal: Vida do Auditor Selecionado (lg:col-span-8) */}
-        <div className="lg:col-span-8 space-y-6">
+        <div className={`lg:col-span-8 space-y-6 ${!selectedAuditor ? 'hidden lg:block' : 'block'}`}>
           {auditorInfo ? (
             <>
+              {/* Botão Mobile para Voltar à Lista */}
+              <button
+                onClick={() => setSelectedAuditor(null)}
+                className="lg:hidden px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-2xl flex items-center gap-1.5 transition-all shadow-xs mb-3"
+              >
+                <ArrowLeft size={15} />
+                <span>Voltar para Lista de Auditores</span>
+              </button>
+
               {/* Card de Identificação Superior com Botão de Auditoria */}
               <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3.5">

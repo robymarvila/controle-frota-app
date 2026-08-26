@@ -411,7 +411,7 @@ export default function WFMDespachoView({ currentUser, activeRegional }) {
   );
 
   return (
-    <div className="animate-in fade-in duration-300 h-[calc(100vh-64px)] overflow-hidden">
+    <div className="animate-in fade-in duration-300 h-full min-h-0 flex-1 overflow-hidden">
       <WFMScreen 
         fieldAudits={fieldAudits} 
         ordens={filteredOrdens} 

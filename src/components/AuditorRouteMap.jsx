@@ -243,21 +243,21 @@ export default function AuditorRouteMap({
     };
   }, [isPlaying, polylineCoords]);
 
-  const activePlaybackPoint = polylineCoords[playbackIndex] || polylineCoords[0];
+    const isDarkMode = typeof document !== 'undefined' && (document.documentElement.classList.contains('dark') || document.body.classList.contains('dark') || document.querySelector('.dark') !== null);
 
-  return (
-    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col select-text">
-      {/* Header do Mapa - Tema Claro */}
-      <div className="p-4 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+    return (
+    <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col select-text">
+      {/* Header do Mapa */}
+      <div className="p-4 bg-slate-50/90 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-200">
+          <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/60">
             <Navigation size={18} />
           </div>
           <div>
-            <h3 className="text-sm font-black text-slate-900 leading-tight">
+            <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 leading-tight">
               Trajeto Percorrido pelo Auditor
             </h3>
-            <p className="text-xs text-slate-500 font-medium">
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
               Rastreamento contínuo e geolocalização dos atendimentos de campo
             </p>
           </div>
@@ -265,14 +265,14 @@ export default function AuditorRouteMap({
 
         {/* Badges de Telemetria */}
         <div className="flex items-center gap-2 text-xs font-bold">
-          <span className="px-3 py-1 bg-white border border-slate-200 text-slate-700 rounded-xl shadow-xs">
-            Distância: <strong className="text-blue-600 font-mono">{totalDistanceKm} km</strong>
+          <span className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl shadow-xs">
+            Distância: <strong className="text-blue-600 dark:text-blue-400 font-mono">{totalDistanceKm} km</strong>
           </span>
-          <span className="px-3 py-1 bg-white border border-slate-200 text-slate-700 rounded-xl shadow-xs">
-            Pontos Registrados: <strong className="text-emerald-600 font-mono">{routePoints.length}</strong>
+          <span className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl shadow-xs">
+            Pontos Registrados: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{routePoints.length}</strong>
           </span>
           {shift?.placa_veiculo && (
-            <span className="px-3 py-1 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl font-mono shadow-xs">
+            <span className="px-3 py-1 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 rounded-xl font-mono shadow-xs">
               Veículo: {shift.placa_veiculo}
             </span>
           )}
@@ -282,10 +282,10 @@ export default function AuditorRouteMap({
       {/* Container do Mapa Leaflet */}
       <div className="relative w-full" style={{ height: height, minHeight: '380px' }}>
         {polylineCoords.length === 0 ? (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-50 text-slate-500 p-6 text-center">
-            <MapPin size={40} className="text-slate-300 mb-2 animate-bounce" />
-            <p className="text-sm font-bold text-slate-700">Nenhum trajeto de GPS registrado para esta data.</p>
-            <p className="text-xs text-slate-400 mt-1 max-w-md">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-500 p-6 text-center">
+            <MapPin size={40} className="text-slate-300 dark:text-slate-700 mb-2 animate-bounce" />
+            <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Nenhum trajeto de GPS registrado para esta data.</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-md">
               O auditor não registrou início de turno ou realizou atendimentos sem envio de coordenadas no dia selecionado.
             </p>
           </div>
@@ -297,10 +297,13 @@ export default function AuditorRouteMap({
           scrollWheelZoom={true}
           style={{ height: '100%', width: '100%', minHeight: '380px' }}
         >
-          {/* Tiles Claros de Alta Qualidade (CartoDB Positron / OpenStreetMap) */}
+          {/* Tiles Dinâmicos (Dark Matter no modo escuro / Voyager no modo claro) */}
           <TileLayer
             attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+            url={isDarkMode 
+              ? "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png"
+              : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+            }
           />
 
           <MapController 
@@ -308,14 +311,14 @@ export default function AuditorRouteMap({
             center={defaultCenter} 
           />
 
-          {/* Polilinha do Trajeto Contínuo (Azul Royal) */}
+          {/* Polilinha do Trajeto Contínuo */}
           {polylineCoords.length > 1 && (
             <Polyline
               positions={polylineCoords}
               pathOptions={{
-                color: '#2563eb',
+                color: isDarkMode ? '#38bdf8' : '#2563eb',
                 weight: 4,
-                opacity: 0.85,
+                opacity: 0.9,
                 lineCap: 'round',
                 lineJoin: 'round',
                 dashArray: '1, 6'
@@ -384,9 +387,9 @@ export default function AuditorRouteMap({
           )}
         </MapContainer>
 
-        {/* Barra Flutuante de Controles de Playback (Light Glass) */}
+        {/* Barra Flutuante de Controles de Playback */}
         {polylineCoords.length > 1 && (
-          <div className="absolute bottom-4 left-4 right-4 z-[400] bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl p-3 shadow-xl flex items-center justify-between gap-4">
+          <div className="absolute bottom-4 left-4 right-4 z-[400] bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-700/90 rounded-2xl p-3 shadow-xl flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsPlaying(!isPlaying)}
@@ -404,7 +407,7 @@ export default function AuditorRouteMap({
                   setIsPlaying(false);
                   setPlaybackIndex(0);
                 }}
-                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition-colors"
+                className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300 transition-colors"
                 title="Reiniciar Percurso"
               >
                 <RotateCcw size={15} />
@@ -423,7 +426,7 @@ export default function AuditorRouteMap({
                 }}
                 className="w-full accent-blue-600 cursor-pointer"
               />
-              <span className="text-[11px] font-mono font-bold text-slate-500 shrink-0">
+              <span className="text-[11px] font-mono font-bold text-slate-500 dark:text-slate-400 shrink-0">
                 Ponto {playbackIndex + 1}/{polylineCoords.length}
               </span>
             </div>
@@ -432,7 +435,7 @@ export default function AuditorRouteMap({
       </div>
 
       {/* Legenda de Ícones do Mapa */}
-      <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-slate-600">
+      <div className="p-3 bg-slate-50 dark:bg-slate-850 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-slate-600 dark:text-slate-400">
         <div className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block shadow-xs"></span>
           <span>Início de Turno</span>

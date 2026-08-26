@@ -41,185 +41,353 @@
 }
 
 /* ============================================================================
-   LIGHT-DARK MODE STYLING OVERRIDES & TRANSITIONS
+   GOOGLE MATERIAL DESIGN 3 EXPRESSIVE + APPLE LIQUID GLASS (LIGHT & DARK SYSTEM)
    ============================================================================ */
 
-/* Root dark class background & text */
-.dark {
-  background-color: #020813 !important;
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Touch & Scrolling */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-scroll {
+  -webkit-overflow-scrolling: touch;
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.min-h-dvh {
+  min-height: 100dvh;
+}
+.h-dvh {
+  height: 100dvh;
+}
+.max-h-dvh {
+  max-height: 100dvh;
+}
+
+/* Base Light Mode */
+body {
+  background-color: #F5F3FF;
+  color: #0f172a;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Base Dark Mode Root */
+.dark,
+.dark body {
+  background-color: #030712 !important;
   color: #f8fafc !important;
 }
 
-/* CSS transition transitions for a premium interface feeling */
-.dark body, 
-.dark div, 
-.dark aside, 
-.dark main, 
-.dark header, 
-.dark section, 
-.dark table, 
-.dark tr, 
-.dark td, 
-.dark th, 
-.dark input, 
-.dark select, 
-.dark textarea, 
-.dark button, 
-.dark span, 
-.dark p, 
-.dark h1, 
-.dark h2, 
-.dark h3, 
-.dark h4, 
-.dark h5, 
-.dark h6 {
-  transition: background-color 0.2s ease-in-out, 
-              border-color 0.2s ease-in-out, 
-              color 0.2s ease-in-out, 
-              box-shadow 0.2s ease-in-out;
+/* Smooth Transitions on interactive / structural elements */
+button, 
+input, 
+select, 
+textarea, 
+a, 
+aside, 
+header, 
+nav, 
+.glass, 
+.glass-card, 
+.glass-modal,
+.theme-transition {
+  transition: background-color 0.25s cubic-bezier(0.2, 0, 0, 1), 
+              border-color 0.25s cubic-bezier(0.2, 0, 0, 1), 
+              color 0.25s cubic-bezier(0.2, 0, 0, 1), 
+              box-shadow 0.25s cubic-bezier(0.2, 0, 0, 1),
+              transform 0.15s ease;
 }
 
-/* Background resets */
+/* ============================================================================
+   GLASSMORPHISM & SURFACE ELEVATIONS (Apple Liquid Glass)
+   ============================================================================ */
+
+/* Glass Base Light */
+.glass {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* Glass Base Dark */
+.dark .glass {
+  background: rgba(11, 16, 29, 0.82) !important;
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* Glass Card Light */
+.glass-card {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.04), 
+              inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Glass Card Dark */
+.dark .glass-card {
+  background: rgba(15, 23, 42, 0.75) !important;
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 
+              inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Glass Modal Dark */
+.dark .glass-modal,
+.dark .bg-white.rounded-3xl,
+.dark .bg-white.rounded-2xl {
+  background-color: #0b1324 !important;
+  border-color: rgba(255, 255, 255, 0.09) !important;
+  box-shadow: 0 25px 65px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ============================================================================
+   MATERIAL DESIGN 3 TONAL ELEVATION & BACKGROUND RESETS IN DARK MODE
+   ============================================================================ */
+
+/* Surface 0 (App Canvas Background) */
 .dark .bg-\[\#F5F3FF\] {
-  background-color: #020813 !important;
-}
-.dark .bg-white {
-  background-color: #0b101d !important;
-}
-.dark .bg-white\/80 {
-  background-color: rgba(11, 16, 29, 0.8) !important;
-}
-.dark .bg-slate-50 {
-  background-color: #070b14 !important;
-}
-.dark .bg-slate-100 {
-  background-color: #1e293b !important;
-}
-.dark .bg-slate-200 {
-  background-color: #334155 !important;
-}
-.dark .bg-slate-900\/40 {
-  background-color: rgba(15, 23, 42, 0.4) !important;
-}
-.dark .bg-slate-950\/40 {
-  background-color: rgba(2, 6, 23, 0.4) !important;
+  background-color: #030712 !important;
 }
 
-/* Border overrides */
-.dark .border-emerald-50,
-.dark .border-emerald-100,
-.dark .border-emerald-100\/50,
+/* Surface 1 & 2 (Cards, Roster, Containers, Table Shells) */
+.dark .bg-white {
+  background-color: #0b1324 !important;
+}
+.dark .bg-white\/90,
+.dark .bg-white\/95,
+.dark .bg-white\/80 {
+  background-color: rgba(11, 19, 36, 0.92) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Surface 3 (Inner Cards, Table Headers, Filter Drawers, Sunken Areas) */
+.dark .bg-slate-50,
+.dark .bg-slate-50\/50,
+.dark .bg-slate-50\/80,
+.dark .bg-slate-50\/90 {
+  background-color: #070d1a !important;
+}
+.dark .bg-slate-100,
+.dark .bg-slate-100\/80,
+.dark .bg-slate-100\/90 {
+  background-color: #131d33 !important;
+}
+.dark .bg-slate-200,
+.dark .bg-slate-200\/50,
+.dark .bg-slate-200\/60 {
+  background-color: #1e2c47 !important;
+}
+
+/* Border Overrides in Dark Mode */
 .dark .border-slate-50,
 .dark .border-slate-100,
-.dark .border-slate-200 {
-  border-color: #1e293b !important;
+.dark .border-slate-200,
+.dark .border-slate-200\/50,
+.dark .border-slate-200\/60,
+.dark .border-slate-200\/70,
+.dark .border-slate-200\/80,
+.dark .border-slate-200\/90,
+.dark .border-slate-300,
+.dark .border-emerald-100,
+.dark .border-emerald-100\/50,
+.dark .border-blue-100,
+.dark .border-blue-200\/60 {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(255, 255, 255, 0.07) !important;
 }
 
-/* Text colors */
+/* Text Colors Hierarchy in Dark Mode */
 .dark .text-blue-950,
 .dark .text-slate-950,
 .dark .text-slate-900,
-.dark .text-slate-800 {
+.dark .text-slate-850 {
   color: #f8fafc !important;
 }
+.dark .text-slate-800,
+.dark .text-slate-750,
 .dark .text-slate-700 {
-  color: #f1f5f9 !important;
-}
-.dark .text-slate-650 {
   color: #e2e8f0 !important;
 }
-.dark .text-slate-600 {
-  color: #cbd5e1 !important;
-}
+.dark .text-slate-600,
+.dark .text-slate-550,
 .dark .text-slate-500 {
-  color: #cbd5e1 !important;
-}
-.dark .text-slate-400 {
   color: #94a3b8 !important;
 }
+.dark .text-slate-400 {
+  color: #64748b !important;
+}
 
-/* Active Sidebar Navigation Item overrides */
+/* ============================================================================
+   DARK NEON SPECTRUM — HIGH CONTRAST STATUS BADGES & ACCENTS
+   ============================================================================ */
+
+/* Emerald / Online / Sucesso / Rodando */
+.dark .bg-emerald-50,
+.dark .bg-emerald-50\/50,
+.dark .bg-emerald-50\/60,
+.dark .bg-emerald-100,
+.dark .bg-emerald-100\/30,
+.dark .bg-emerald-100\/50,
 .dark .bg-emerald-100\/80 {
-  background-color: rgba(16, 185, 129, 0.15) !important;
+  background-color: rgba(16, 185, 129, 0.14) !important;
+  border-color: rgba(52, 211, 153, 0.35) !important;
 }
-.dark .text-emerald-700 {
-  color: #34d399 !important;
-}
-.dark .hover\:bg-slate-50:hover {
-  background-color: rgba(30, 41, 59, 0.5) !important;
-}
-.dark .hover\:bg-slate-100:hover {
-  background-color: rgba(51, 65, 85, 0.5) !important;
-}
-
-/* Form Inputs, Select & Dialog controllers */
-.dark input, 
-.dark select, 
-.dark textarea {
-  background-color: #070b14 !important;
-  color: #f8fafc !important;
-  border-color: #1e293b !important;
-}
-.dark input:disabled, 
-.dark select:disabled {
-  background-color: #0b101d !important;
-  opacity: 0.65;
-}
-.dark input::placeholder {
-  color: #475569 !important;
-}
-
-/* Pastel KPI background conversion to transparent glows */
-.dark .bg-blue-50 {
-  background-color: rgba(59, 130, 246, 0.08) !important;
-  border-color: rgba(59, 130, 246, 0.15) !important;
-}
-.dark .bg-emerald-50 {
-  background-color: rgba(16, 185, 129, 0.08) !important;
-  border-color: rgba(16, 185, 129, 0.15) !important;
-}
-.dark .bg-rose-50 {
-  background-color: rgba(239, 68, 68, 0.08) !important;
-  border-color: rgba(239, 68, 68, 0.15) !important;
-}
-.dark .bg-amber-50 {
-  background-color: rgba(245, 158, 11, 0.08) !important;
-  border-color: rgba(245, 158, 11, 0.15) !important;
-}
-
-/* Rich KPI text corrections */
-.dark .text-blue-900 {
-  color: #60a5fa !important;
-}
+.dark .text-emerald-950,
+.dark .text-emerald-900,
 .dark .text-emerald-800,
+.dark .text-emerald-700,
 .dark .text-emerald-600 {
   color: #34d399 !important;
 }
-.dark .text-rose-600,
-.dark .text-rose-800 {
-  color: #f87171 !important;
+
+/* Blue / Primário / Informação / Ativo */
+.dark .bg-blue-50,
+.dark .bg-blue-50\/50,
+.dark .bg-blue-50\/60,
+.dark .bg-blue-50\/70,
+.dark .bg-blue-100,
+.dark .bg-blue-100\/30,
+.dark .bg-blue-100\/50 {
+  background-color: rgba(59, 130, 246, 0.14) !important;
+  border-color: rgba(96, 165, 250, 0.35) !important;
 }
-.dark .text-amber-800 {
+.dark .text-blue-900,
+.dark .text-blue-800,
+.dark .text-blue-700,
+.dark .text-blue-600 {
+  color: #60a5fa !important;
+}
+
+/* Amber / Atenção / Almoço / Compras / Em Andamento */
+.dark .bg-amber-50,
+.dark .bg-amber-50\/50,
+.dark .bg-amber-50\/60,
+.dark .bg-amber-100,
+.dark .bg-amber-100\/30,
+.dark .bg-amber-100\/50 {
+  background-color: rgba(245, 158, 11, 0.14) !important;
+  border-color: rgba(251, 191, 36, 0.35) !important;
+}
+.dark .text-amber-950,
+.dark .text-amber-900,
+.dark .text-amber-800,
+.dark .text-amber-700,
+.dark .text-amber-600 {
   color: #fbbf24 !important;
 }
 
-/* Hover transitions on table rows */
-.dark .hover\:bg-slate-50:hover {
-  background-color: #0d1220 !important;
+/* Rose / Parado / Impeditivo / Falta / Erro / Recusado */
+.dark .bg-rose-50,
+.dark .bg-rose-50\/50,
+.dark .bg-rose-50\/60,
+.dark .bg-rose-100,
+.dark .bg-rose-100\/30,
+.dark .bg-rose-100\/50 {
+  background-color: rgba(239, 68, 68, 0.14) !important;
+  border-color: rgba(248, 113, 113, 0.35) !important;
+}
+.dark .text-rose-950,
+.dark .text-rose-900,
+.dark .text-rose-800,
+.dark .text-rose-700,
+.dark .text-rose-600 {
+  color: #f87171 !important;
 }
 
-/* Custom Scrollbars in Dark Mode */
+/* Purple / Ocorrência / Folga / WFM / Fidelização */
+.dark .bg-purple-50,
+.dark .bg-purple-50\/50,
+.dark .bg-purple-50\/60,
+.dark .bg-purple-100,
+.dark .bg-purple-100\/30,
+.dark .bg-purple-100\/50,
+.dark .bg-indigo-50,
+.dark .bg-indigo-100 {
+  background-color: rgba(139, 92, 246, 0.14) !important;
+  border-color: rgba(167, 139, 250, 0.35) !important;
+}
+.dark .text-purple-950,
+.dark .text-purple-900,
+.dark .text-purple-800,
+.dark .text-purple-700,
+.dark .text-purple-600,
+.dark .text-indigo-700,
+.dark .text-indigo-600 {
+  color: #a78bfa !important;
+}
+
+/* ============================================================================
+   FORM CONTROLS & INPUTS IN DARK MODE
+   ============================================================================ */
+.dark input:not([type="checkbox"]):not([type="radio"]), 
+.dark select, 
+.dark textarea {
+  background-color: #070d1a !important;
+  color: #f8fafc !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+.dark input:not([type="checkbox"]):not([type="radio"]):focus, 
+.dark select:focus, 
+.dark textarea:focus {
+  background-color: #0b1324 !important;
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18) !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #475569 !important;
+}
+.dark input:disabled, 
+.dark select:disabled,
+.dark textarea:disabled {
+  background-color: #040813 !important;
+  opacity: 0.55;
+  border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Table Row Hovers */
+.dark tr.hover\:bg-slate-50\/80:hover,
+.dark tr.hover\:bg-slate-50:hover,
+.dark div.hover\:bg-slate-50:hover {
+  background-color: rgba(19, 29, 51, 0.6) !important;
+}
+
+/* Scrollbars in Dark Mode */
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #334155 !important;
+  background: #1e2c47 !important;
 }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #475569 !important;
+  background: #334155 !important;
 }
 
-/* Recharts Dark Tooltip overrides */
+/* Recharts Tooltips in Dark Mode */
 .dark .recharts-default-tooltip {
-  background-color: #0b101d !important;
-  border-color: #1e293b !important;
+  background-color: #0b1324 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
 }
 .dark .recharts-tooltip-item {
   color: #cbd5e1 !important;
@@ -228,85 +396,25 @@
   color: #f8fafc !important;
 }
 
-/* Specific opacity background overrides for tables and badges */
-.dark .bg-blue-50\/70 {
-  background-color: rgba(59, 130, 246, 0.15) !important;
+/* Leaflet Custom Popups in Dark Mode */
+.dark .leaflet-popup-content-wrapper {
+  background: #0b1324 !important;
+  color: #f8fafc !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6) !important;
 }
-.dark .border-blue-100 {
-  border-color: rgba(59, 130, 246, 0.25) !important;
+.dark .leaflet-popup-tip {
+  background: #0b1324 !important;
 }
-.dark .bg-slate-200\/50 {
-  background-color: rgba(51, 65, 85, 0.3) !important;
-  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+.dark .leaflet-popup-content h4 {
+  color: #f8fafc !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
 }
-.dark .bg-slate-50\/50 {
-  background-color: rgba(15, 23, 42, 0.25) !important;
+.dark .leaflet-popup-content p {
+  color: #94a3b8 !important;
 }
-.dark .bg-slate-100\/80 {
-  background-color: rgba(51, 65, 85, 0.35) !important;
-}
-.dark .bg-emerald-50\/60 {
-  background-color: rgba(16, 185, 129, 0.12) !important;
-}
-.dark .bg-emerald-100\/30 {
-  background-color: rgba(16, 185, 129, 0.2) !important;
-}
-.dark .bg-rose-50\/60 {
-  background-color: rgba(239, 68, 68, 0.12) !important;
-}
-.dark .bg-rose-100\/30 {
-  background-color: rgba(239, 68, 68, 0.2) !important;
-}
-
-/* Specific text colors for table values */
-.dark .text-emerald-700 {
-  color: #34d399 !important;
-}
-.dark .text-rose-700 {
-  color: #f87171 !important;
-}
-.dark .text-indigo-700 {
-  color: #818cf8 !important;
-}
-
-/* ============================================================================
-   MOBILE PWA DESIGN SYSTEM — Material Design 3 Expressive + Apple Liquid Glass
-   ============================================================================ */
-
-/* Safe areas for iPhone notch / Dynamic Island */
-:root {
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-}
-
-/* Glassmorphism — Apple Liquid Glass */
-.glass {
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-}
-.dark .glass {
-  background: rgba(11, 16, 29, 0.78);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.glass-card {
-  background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06), 
-              0 1px 3px rgba(0, 0, 0, 0.04);
-}
-.dark .glass-card {
-  background: rgba(15, 23, 42, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+.dark .leaflet-popup-content strong {
+  color: #60a5fa !important;
 }
 
 /* Bottom Navigation Bar */
@@ -327,16 +435,6 @@
   padding-top: var(--safe-top);
 }
 
-/* Material 3 Pill Indicator */
-.nav-pill {
-  transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
-}
-.nav-pill-active {
-  background: rgba(16, 185, 129, 0.14);
-  border-radius: 16px;
-  padding: 4px 20px;
-}
-
 /* Ripple Touch Effect */
 .ripple {
   position: relative;
@@ -348,170 +446,32 @@
   position: absolute;
   inset: 0;
   background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), 
-              rgba(0, 0, 0, 0.06) 0%, transparent 70%);
+              rgba(255, 255, 255, 0.1) 0%, transparent 70%);
   opacity: 0;
-  transition: opacity 0.4s ease-out;
+  transition: opacity 0.3s ease-out;
   pointer-events: none;
 }
 .ripple:active::after {
   opacity: 1;
-  transition: opacity 0.1s ease-in;
+  transition: opacity 0.08s ease-in;
 }
 
-/* Touch-optimized targets — 48px minimum (Material Guidelines) */
+/* Mobile Touch Targets */
 @media (max-width: 768px) {
   .touch-target {
-    min-height: 48px;
-    min-width: 48px;
+    min-height: 44px;
+    min-width: 44px;
   }
-
-  /* Prevent auto-zoom on input focus (iOS) */
   input, select, textarea {
     font-size: 16px !important;
   }
-
-  /* Smooth native scrolling */
-  .mobile-scroll {
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior-y: contain;
-    scroll-behavior: smooth;
-  }
-
-  /* Full-screen mobile modal */
-  .mobile-fullscreen-modal {
-    position: fixed !important;
-    inset: 0 !important;
-    max-width: 100% !important;
-    max-height: 100% !important;
-    border-radius: 0 !important;
-    margin: 0 !important;
-  }
-
-  /* Mobile card with press feedback */
-  .mobile-card-press {
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
-  }
-  .mobile-card-press:active {
-    transform: scale(0.97);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  }
-
-  /* Hide desktop sidebar on mobile */
-  .desktop-sidebar {
-    display: none !important;
-  }
-
-  /* Full-width mobile content */
-  .mobile-content {
-    padding-left: var(--safe-left) !important;
-    padding-right: var(--safe-right) !important;
-  }
 }
 
-/* Tablet adjustments */
-@media (min-width: 769px) and (max-width: 1024px) {
-  .tablet-grid {
-    grid-template-columns: repeat(2, 1fr) !important;
-  }
-}
-
-/* PWA standalone mode adjustments */
-@media (display-mode: standalone) {
-  body {
-    overscroll-behavior-y: none;
-    -webkit-user-select: none;
-    user-select: none;
-  }
-  
-  /* Prevent pull-to-refresh on PWA */
-  html {
-    overscroll-behavior: none;
-  }
-}
-
-/* Mobile-specific scrollbar hide */
-@media (max-width: 1024px) {
-  .mobile-no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .mobile-no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-}
-
-/* Progress bar for mobile wizard */
-.mobile-progress-bar {
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(16, 185, 129, 0.15);
-  overflow: hidden;
-}
-.mobile-progress-bar-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #059669, #14b8a6);
-  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Mobile floating action button */
-.mobile-fab {
-  position: fixed;
-  right: 20px;
-  bottom: calc(88px + var(--safe-bottom));
-  z-index: 45;
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 6px 20px rgba(5, 150, 105, 0.35),
-              0 2px 6px rgba(5, 150, 105, 0.2);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-.mobile-fab:active {
-  transform: scale(0.92);
-}
-
-/* Bottom sheet overlay */
-.bottom-sheet-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 60;
-  animation: fadeInOverlay 0.2s ease;
-}
-.bottom-sheet {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 61;
-  border-radius: 24px 24px 0 0;
-  padding-bottom: var(--safe-bottom);
-  animation: slideUpSheet 0.35s cubic-bezier(0.32, 0.72, 0, 1);
-  max-height: 85vh;
-  overflow-y: auto;
-}
-
-@keyframes fadeInOverlay {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes slideUpSheet {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
-}
-@keyframes slideInRight {
-  from { opacity: 0; transform: translateX(30px); }
-  to { opacity: 1; transform: translateX(0); }
-}
+/* Animations */
 @keyframes mobilePageIn {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .mobile-page-enter {
-  animation: mobilePageIn 0.3s ease-out;
+  animation: mobilePageIn 0.25s ease-out;
 }
-

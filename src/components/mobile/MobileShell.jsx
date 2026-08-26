@@ -8,7 +8,7 @@ import { ArrowLeft, Plus } from 'lucide-react';
 const tabModuleMap = {
   inicio: ['inicio', 'dashboard', 'calendario', 'historico', 'painel_tv'],
   frota: ['chamados', 'frota', 'ociosidade_frota', 'fidelizacao', 'detalhes_veiculo', 'mecanico'],
-  fiscalizacao: ['autofiscalizacao', 'wfm_despacho'],
+  fiscalizacao: ['autofiscalizacao', 'wfm_despacho', 'status_auditores'],
   operacao: ['entrega_equipes', 'forca', 'colaboradores', 'detalhes_colaborador'],
   mais: ['meu_perfil', 'usuarios'],
 };
@@ -40,6 +40,8 @@ export default function MobileShell({
   // State from App
   activeTab,
   setActiveTab,
+  activeRegional,
+  setActiveRegional,
   currentUser,
   userPermissions,
   theme,
@@ -89,11 +91,10 @@ export default function MobileShell({
 
   return (
     <div
-      className={isDark ? 'dark' : ''}
+      className={`${isDark ? 'dark' : ''} h-dvh min-h-dvh`}
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100vh',
         width: '100%',
         background: isDark ? '#020813' : '#F5F3FF',
         overflow: 'hidden',
@@ -108,8 +109,15 @@ export default function MobileShell({
         showBackButton={isInsideModule}
         onBack={handleBack}
         currentUser={currentUser}
+        activeRegional={activeRegional}
+        setActiveRegional={setActiveRegional}
         theme={theme}
         setTheme={setTheme}
+        onLogout={onLogout}
+        onNavigateProfile={() => {
+          setActiveCategory('mais');
+          handleSelectModule('meu_perfil');
+        }}
       />
 
       {/* Main Content Area */}

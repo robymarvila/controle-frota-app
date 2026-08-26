@@ -6,6 +6,7 @@ import 'leaflet/dist/leaflet.css';
 
 import L from 'leaflet';
 import { supabase } from '../supabaseClient';
+import ModalConfirmacaoLogout from './ModalConfirmacaoLogout';
 import { gpsService } from '../services/gpsService';
 import { permissionService } from '../services/permissionService';
 import { notificationService } from '../services/notificationService';
@@ -9437,24 +9438,21 @@ function MobileProfile({ currentUser, onBack, upsertSupabase, onLogout }) {
 
   };
 
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
   const handleSystemLogout = () => {
+    setShowLogoutConfirm(true);
+  };
 
-    if (confirm('Deseja realmente sair do sistema?')) {
-
-      sessionStorage.removeItem('currentUser');
-
-      if (onLogout) {
-
-        onLogout();
-
-      } else {
-
-        window.location.reload();
-
-      }
-
+  const handleConfirmLogout = () => {
+    setShowLogoutConfirm(false);
+    sessionStorage.removeItem('currentUser');
+    localStorage.removeItem('currentUser');
+    if (onLogout) {
+      onLogout();
+    } else {
+      window.location.reload();
     }
-
   };
 
   return (
@@ -9708,6 +9706,14 @@ function MobileProfile({ currentUser, onBack, upsertSupabase, onLogout }) {
         </div>
 
       </div>
+
+      {/* Ultra-Premium System Logout Confirmation Modal */}
+      <ModalConfirmacaoLogout
+        isOpen={showLogoutConfirm}
+        onClose={() => setShowLogoutConfirm(false)}
+        onConfirm={handleConfirmLogout}
+        currentUser={currentUser}
+      />
 
     </div>
 

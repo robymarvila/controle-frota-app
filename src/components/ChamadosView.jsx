@@ -150,13 +150,13 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
   }, [chamadosOficinaExternaBase]);
 
   const chamadosOficinaInternaBase = useMemo(() => {
-    return chamadosAbertos.filter(c => c.etapaWorkflow === 'Oficina Interna' || c.dadosWorkflow?.tipoOficina === 'Interna');
+    return chamadosAbertos.filter(c => c.etapaWorkflow === 'Oficina Interna' || c.dadosWorkflow?.tipoOficina === 'Interna' || c.tipo_oficina === 'Interna');
   }, [chamadosAbertos]);
 
   const oficinaInternaSubFluxoDistrib = useMemo(() => {
     const counts = { DIRETA: 0, COMPRAS: 0, FINANCEIRO: 0, PAGO: 0 };
     chamadosOficinaInternaBase.forEach(c => {
-      const sf = c.dadosWorkflow?.subFluxoOficina?.status;
+      const sf = c.dadosWorkflow?.subFluxoOficina?.status || c.sub_fluxo_status;
       if (sf === 'COMPRAS') counts.COMPRAS++;
       else if (sf === 'FINANCEIRO') counts.FINANCEIRO++;
       else if (sf === 'PAGO') counts.PAGO++;
@@ -196,7 +196,10 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
       if (filters.tipoOp && String(veiculo?.tipoOp || '').toUpperCase() !== String(filters.tipoOp).toUpperCase()) return false;
       if (filters.subTipo && String(veiculo?.subTipo || '').toUpperCase() !== String(filters.subTipo).toUpperCase()) return false;
       if (filters.etapa && getEtapaWorkflow(c) !== filters.etapa) return false;
-      if (filters.subFluxo && c.dadosWorkflow?.subFluxoOficina?.status !== filters.subFluxo) return false;
+      if (filters.subFluxo) {
+        const currentSf = c.dadosWorkflow?.subFluxoOficina?.status || c.sub_fluxo_status || 'DIRETA';
+        if (currentSf !== filters.subFluxo) return false;
+      }
 
       // 3. Filtro Ativo do Card (Visão Executiva)
       if (cardFilter.type === 'IMPEDITIVO') {
@@ -214,17 +217,17 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
           if (cat !== cardFilter.subTipo) return false;
         }
       } else if (cardFilter.type === 'OFICINA_EXTERNA') {
-        const isExt = c.etapaWorkflow === 'Oficina Externa' || c.oficinaExterna === 'SIM' || (c.dadosWorkflow?.tipoOficina === 'Externa' && c.etapaWorkflow !== 'RESOLVIDO');
+        const isExt = c.etapaWorkflow === 'Oficina Externa' || c.oficinaExterna === 'SIM' || (c.dadosWorkflow?.tipoOficina === 'Externa' && c.etapaWorkflow !== 'RESOLVIDO') || (c.tipo_oficina === 'Externa' && c.etapaWorkflow !== 'RESOLVIDO');
         if (!isExt) return false;
         if (cardFilter.oficina) {
           const ofName = (c.oficinaDestino || c.dadosWorkflow?.oficinaDestino || 'Oficina Credenciada').trim();
           if (ofName !== cardFilter.oficina) return false;
         }
       } else if (cardFilter.type === 'OFICINA_INTERNA') {
-        const isInt = c.etapaWorkflow === 'Oficina Interna' || c.dadosWorkflow?.tipoOficina === 'Interna';
+        const isInt = c.etapaWorkflow === 'Oficina Interna' || c.dadosWorkflow?.tipoOficina === 'Interna' || c.tipo_oficina === 'Interna';
         if (!isInt) return false;
         if (cardFilter.subFluxo) {
-          const sf = c.dadosWorkflow?.subFluxoOficina?.status;
+          const sf = c.dadosWorkflow?.subFluxoOficina?.status || c.sub_fluxo_status || 'DIRETA';
           if (cardFilter.subFluxo === 'DIRETA' && (sf === 'COMPRAS' || sf === 'FINANCEIRO' || sf === 'PAGO')) return false;
           if (cardFilter.subFluxo !== 'DIRETA' && sf !== cardFilter.subFluxo) return false;
         }
@@ -286,12 +289,13 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
           const equipeCod = veiculoObj?.equipes?.[0]?.codEquipe || 'Sem Equipe';
           const horas = calcularHorasParadas(c.dataAbertura, c.dataHoraFechamento, hoje);
 
-          const isInternal = c.dadosWorkflow?.tipoOficina === 'Interna' || c.etapaWorkflow === 'Oficina Interna';
+          const isInternal = c.dadosWorkflow?.tipoOficina === 'Interna' || c.etapaWorkflow === 'Oficina Interna' || c.etapaWorkflow === 'Aguardando Validação Frota';
 
           const steps = isInternal 
             ? [
                 { id: 'Análise Frota', label: 'Análise', icon: Wrench },
                 { id: 'Oficina Interna', label: 'Oficina Int', icon: Home },
+                { id: 'Aguardando Validação Frota', label: 'Validação Frota', icon: ClipboardCheck },
                 { id: 'Liberado Operação', label: 'Liberado', icon: PlayCircle },
                 { id: 'RESOLVIDO', label: 'Concluído', icon: CheckCircle2 }
               ]
@@ -465,25 +469,29 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                       )}
 
                       {/* BOLINHAS DO SUB-FLUXO */}
-                      {step.id === 'Oficina Interna' && c.dadosWorkflow?.subFluxoOficina && ['COMPRAS', 'FINANCEIRO', 'PAGO'].includes(c.dadosWorkflow.subFluxoOficina.status) && (
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 flex flex-col items-center z-50">
-                          <div className="w-0.5 h-3 bg-slate-200 mb-1"></div>
-                          <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${c.dadosWorkflow.subFluxoOficina.status === 'COMPRAS' ? 'bg-amber-500 text-white border-amber-500 ring-2 ring-amber-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
-                            <Briefcase size={8} />
-                          </div>
-                          <span className={`text-[6px] font-black uppercase mb-1 ${c.dadosWorkflow.subFluxoOficina.status === 'COMPRAS' ? 'text-amber-600' : 'text-emerald-600'}`}>Compras</span>
+                      {step.id === 'Oficina Interna' && (() => {
+                        const sfStatus = c.dadosWorkflow?.subFluxoOficina?.status || c.sub_fluxo_status;
+                        if (!['COMPRAS', 'FINANCEIRO', 'PAGO'].includes(sfStatus)) return null;
+                        return (
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 flex flex-col items-center z-50">
+                            <div className="w-0.5 h-3 bg-slate-200 mb-1"></div>
+                            <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${sfStatus === 'COMPRAS' ? 'bg-amber-500 text-white border-amber-500 ring-2 ring-amber-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
+                              <Briefcase size={8} />
+                            </div>
+                            <span className={`text-[6px] font-black uppercase mb-1 ${sfStatus === 'COMPRAS' ? 'text-amber-600' : 'text-emerald-600'}`}>Compras</span>
 
-                          {(c.dadosWorkflow.subFluxoOficina.status === 'FINANCEIRO' || c.dadosWorkflow.subFluxoOficina.status === 'PAGO') && (
-                            <>
-                              <div className="w-0.5 h-2 bg-slate-200 -mt-1 mb-1"></div>
-                              <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${c.dadosWorkflow.subFluxoOficina.status === 'FINANCEIRO' ? 'bg-blue-500 text-white border-blue-500 ring-2 ring-blue-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
-                                <DollarSign size={8} />
-                              </div>
-                              <span className={`text-[6px] font-black uppercase ${c.dadosWorkflow.subFluxoOficina.status === 'FINANCEIRO' ? 'text-blue-600' : 'text-emerald-600'}`}>Finan</span>
-                            </>
-                          )}
-                        </div>
-                      )}
+                            {(sfStatus === 'FINANCEIRO' || sfStatus === 'PAGO') && (
+                              <>
+                                <div className="w-0.5 h-2 bg-slate-200 -mt-1 mb-1"></div>
+                                <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${sfStatus === 'FINANCEIRO' ? 'bg-blue-500 text-white border-blue-500 ring-2 ring-blue-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
+                                  <DollarSign size={8} />
+                                </div>
+                                <span className={`text-[6px] font-black uppercase ${sfStatus === 'FINANCEIRO' ? 'text-blue-600' : 'text-emerald-600'}`}>Finan</span>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -498,6 +506,17 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                 >
                   <Eye size={18} />
                 </button>
+
+                {c.etapaWorkflow === 'Aguardando Validação Frota' && (
+                  <button 
+                    onClick={() => onEditar(c)}
+                    className="px-4 py-2 bg-purple-50 hover:bg-purple-600 text-purple-700 hover:text-white dark:bg-purple-950/60 dark:text-purple-300 dark:hover:bg-purple-600 rounded-full text-xs font-black transition-all active:scale-95 shadow-xs border border-purple-200 dark:border-purple-800/60 flex items-center gap-1.5"
+                    title="Avaliar Solicitação do Mecânico"
+                  >
+                    <ClipboardCheck size={14} />
+                    Avaliar Liberação
+                  </button>
+                )}
 
                 {podeFinalizar && c.etapaWorkflow?.includes('Liberado Opera') ? (
                   isAttention ? (
@@ -547,7 +566,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
   const activeFilterLabel = getActiveFilterDescription();
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-12">
+    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-28 md:pb-12 px-2 sm:px-4 select-text">
       
       {/* 1. TOP ACTION & SEARCH BAR (Apple Liquid Glass + Material 3) */}
       <div className="bg-white/90 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.03)] border border-slate-100 p-4 sm:p-5 relative z-40">
@@ -578,8 +597,8 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
             {/* Instant Floating Dropdown Results */}
             {isSearchFocused && searchQuery.trim() && (
-              <div className="absolute left-0 right-0 top-full mt-2 bg-white/95 backdrop-blur-2xl border border-slate-200/80 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-50 overflow-hidden max-h-80 overflow-y-auto animate-in fade-in zoom-in-95 duration-200 p-2 space-y-1">
-                <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-400 tracking-wider flex items-center justify-between">
+              <div className="absolute left-0 right-0 top-full mt-2 bg-white/95 backdrop-blur-2xl border border-slate-200/80 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-50 overflow-hidden max-h-80 overflow-y-auto animate-in fade-in zoom-in-95 duration-200 p-2 space-y-1.5">
+                <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-400 tracking-wider flex items-center justify-between border-b border-slate-100 pb-2">
                   <span>Resultados da busca ({searchResults.length})</span>
                   <span>Clique para abrir</span>
                 </div>
@@ -591,39 +610,42 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                     <div 
                       key={c.id}
                       onMouseDown={() => { onEditar(c); setIsSearchFocused(false); }}
-                      className="p-3 rounded-xl hover:bg-slate-100/90 transition-all cursor-pointer border border-transparent hover:border-slate-200/60 group flex items-start justify-between gap-3"
+                      className="p-3 rounded-2xl hover:bg-slate-50 bg-white transition-all cursor-pointer border border-slate-100 hover:border-slate-300 shadow-2xs group flex flex-col sm:flex-row sm:items-center justify-between gap-2"
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1">
                           <span className="font-black text-sm text-blue-950 group-hover:text-emerald-600 transition-colors">
                             {c.placa}
                           </span>
-                          <span className="text-[10px] font-bold text-slate-500 px-2 py-0.5 bg-slate-100 rounded-md">
-                            {subTipo}
-                          </span>
                           {c.codigoChamado && (
-                            <span className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                              {c.codigoChamado}
+                            <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
+                              SOL: {c.codigoChamado}
                             </span>
                           )}
+                          <span className="text-[10px] font-bold text-slate-600 px-2 py-0.5 bg-slate-100 rounded-md border border-slate-200/60">
+                            {subTipo}
+                          </span>
                         </div>
-                        <p className="text-xs text-slate-600 font-bold truncate">
-                          {c.defeitoPrincipal || c.defeitoEncontrado || 'Sem descrição'}
+                        <p className="text-xs text-slate-700 font-bold truncate">
+                          {c.defeitoPrincipal || c.defeitoEncontrado || 'Sem descrição informada'}
                         </p>
                         {c.motorista && (
-                          <span className="text-[11px] text-slate-400 font-medium">
-                            Motorista: {c.motorista}
-                          </span>
+                          <p className="text-[11px] text-slate-500 font-medium truncate mt-0.5">
+                            Motorista: <strong className="text-slate-700">{c.motorista}</strong>
+                          </p>
                         )}
                       </div>
-                      <div className="flex flex-col items-end shrink-0 gap-1">
-                        <span className={`text-[9px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${
-                          isImp ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-800'
+                      <div className="flex items-center sm:flex-col sm:items-end justify-between shrink-0 gap-1 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                        <span className={`text-[9px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                          isImp 
+                            ? 'bg-rose-50 text-rose-700 border-rose-200' 
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
                         }`}>
                           {c.etapaWorkflow || 'Análise Frota'}
                         </span>
-                        <span className="text-[10px] font-black text-slate-400">
-                          {isImp ? '🔴 Parado' : '🟢 Rodando'}
+                        <span className={`text-[10px] font-black flex items-center gap-1 ${isImp ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isImp ? 'bg-rose-500' : 'bg-emerald-500'}`}></span>
+                          {isImp ? 'Veículo Parado' : 'Veículo Rodando'}
                         </span>
                       </div>
                     </div>
@@ -1128,66 +1150,79 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
       {/* 4. MODAL DE FILTROS AVANÇADOS DE CHAMADOS */}
       {showChamadosFiltersModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full sm:max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-6 bg-slate-50 border-b border-slate-100 flex justify-between items-center sticky top-0 z-10">
+        <div className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-dvh sm:max-h-[85vh] h-auto border border-slate-200">
+            <div className="p-4 sm:p-6 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0 pt-safe sm:pt-6">
               <div className="flex items-center gap-2">
-                <Filter size={20} className="text-emerald-600" />
-                <h3 className="text-lg font-black text-blue-950">Filtros Avançados de Chamados</h3>
+                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200">
+                  <Filter size={18} />
+                </div>
+                <h3 className="text-base sm:text-lg font-black text-blue-950">Filtros Avançados de Chamados</h3>
               </div>
-              <button onClick={() => setShowChamadosFiltersModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+              <button 
+                onClick={() => setShowChamadosFiltersModal(false)} 
+                className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500"
+              >
                 <X size={20} />
               </button>
             </div>
 
-            <div className="p-6 space-y-4 overflow-y-auto flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="p-4 sm:p-6 space-y-3.5 overflow-y-auto flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3.5 pb-6">
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Turno</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.turno} onChange={e => setFilters({...filters, turno: e.target.value})}>
+                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-xs sm:text-sm text-slate-700 border border-slate-200 outline-none focus:bg-white focus:border-emerald-500" value={filters.turno} onChange={e => setFilters({...filters, turno: e.target.value})}>
                   <option value="">Turno (Todos)</option><option>Manhã</option><option>Tarde</option><option>Noite</option><option>Linha Viva</option>
                 </select>
               </div>
 
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Tipo OP</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.tipoOp} onChange={e => setFilters({...filters, tipoOp: e.target.value})}>
+                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-xs sm:text-sm text-slate-700 border border-slate-200 outline-none focus:bg-white focus:border-emerald-500" value={filters.tipoOp} onChange={e => setFilters({...filters, tipoOp: e.target.value})}>
                   <option value="">Tipo OP (Todos)</option><option>TMA</option><option>Linha Viva</option><option>Linha Morta</option><option>SOC</option>
                 </select>
               </div>
 
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Sub Tipo</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.subTipo} onChange={e => setFilters({...filters, subTipo: e.target.value})}>
+                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-xs sm:text-sm text-slate-700 border border-slate-200 outline-none focus:bg-white focus:border-emerald-500" value={filters.subTipo} onChange={e => setFilters({...filters, subTipo: e.target.value})}>
                   <option value="">Sub Tipo (Todos)</option><option>Munk</option><option>Cesto Aéreo</option><option>Fiorino</option><option>Strada</option><option>Argo</option><option>Moto</option><option>Leve</option>
                 </select>
               </div>
 
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Sub Fluxo</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.subFluxo || ""} onChange={e => setFilters({...filters, subFluxo: e.target.value})}>
+                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-xs sm:text-sm text-slate-700 border border-slate-200 outline-none focus:bg-white focus:border-emerald-500" value={filters.subFluxo || ""} onChange={e => setFilters({...filters, subFluxo: e.target.value})}>
                   <option value="">Sub Fluxo (Todos)</option><option value="COMPRAS">Em Compras</option><option value="FINANCEIRO">Em Financeiro</option><option value="PAGO">Pago</option>
                 </select>
               </div>
 
               <div className="sm:col-span-2">
                 <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">Etapa Workflow</label>
-                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-700 border border-slate-200 outline-none" value={filters.etapa} onChange={e => setFilters({...filters, etapa: e.target.value})}>
+                <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-xs sm:text-sm text-slate-700 border border-slate-200 outline-none focus:bg-white focus:border-emerald-500" value={filters.etapa} onChange={e => setFilters({...filters, etapa: e.target.value})}>
                   <option value="">Etapa Workflow (Todas)</option>
                   <option value="Análise Frota">Análise Frota</option>
+                  <option value="Oficina Interna">Oficina Interna</option>
+                  <option value="Aguardando Validação Frota">Validação Frota</option>
                   <option value="Aguardando Desequipar">Aguardando Desequipar</option>
                   <option value="Desequipado - Entrada Oficina">Desequipado (Entrada Oficina)</option>
-                  <option value="Oficina Interna">Oficina Interna</option>
                   <option value="Oficina Externa">Oficina Externa</option>
                   <option value="Liberado Operação">Liberado Operação</option>
                 </select>
               </div>
             </div>
 
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-2">
-              <button onClick={clearChamadosModalFilters} className="flex-1 py-3 text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl font-black text-sm transition-colors">
+            {/* Sticky Action Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-3 shrink-0 pb-safe sm:pb-4 sticky bottom-0 z-20 shadow-lg">
+              <button 
+                onClick={clearChamadosModalFilters} 
+                className="flex-1 py-3 text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl font-black text-xs sm:text-sm transition-colors border border-rose-200 active:scale-95"
+              >
                 Limpar Filtros
               </button>
-              <button onClick={() => setShowChamadosFiltersModal(false)} className="flex-1 py-3 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl font-black text-sm transition-colors shadow-md shadow-emerald-600/20">
+              <button 
+                onClick={() => setShowChamadosFiltersModal(false)} 
+                className="flex-1 py-3 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl font-black text-xs sm:text-sm transition-colors shadow-md shadow-emerald-600/20 active:scale-95"
+              >
                 Aplicar Filtros
               </button>
             </div>

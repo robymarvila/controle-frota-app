@@ -1,5 +1,5 @@
 // Service Worker — Fleet Operação PWA
-const CACHE_NAME = 'fleet-op-v1';
+const CACHE_NAME = 'fleet-op-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

@@ -60,6 +60,11 @@ export default function MobileCategoryHub({
   // Filter by permission
   const visibleModules = modules.filter(mod => {
     if (mod.permKey === null) return true; // always visible (e.g. Meu Perfil)
+    if (mod.id === 'status_auditores') {
+      return userPermissions?.modulos_visiveis?.includes('status_auditores') ||
+             userPermissions?.modulos_visiveis?.includes('wfm_despacho') ||
+             userPermissions?.modulos_visiveis?.includes('autofiscalizacao');
+    }
     return userPermissions?.modulos_visiveis?.includes(mod.permKey);
   });
 
@@ -157,7 +162,7 @@ export default function MobileCategoryHub({
                   style={{
                     fontSize: 13,
                     fontWeight: 600,
-                    color: isDark ? '#475569' : '#94a3b8',
+                    color: isDark ? '#94a3b8' : '#64748b',
                     margin: 0,
                     lineHeight: 1.4,
                   }}
@@ -170,7 +175,7 @@ export default function MobileCategoryHub({
               <ChevronRight
                 size={20}
                 style={{
-                  color: isDark ? '#334155' : '#cbd5e1',
+                  color: isDark ? '#64748b' : '#cbd5e1',
                   flexShrink: 0,
                 }}
               />

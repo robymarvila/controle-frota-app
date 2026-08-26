@@ -13,7 +13,7 @@ import {
 
   Contact, PlusCircle, Trash2, FileCheck, Upload, Activity, Lock, Unlock, LogOut, CheckSquare,
 
-  BarChart3, LineChart as LineChartIcon, Download, Eye, EyeOff, Smartphone, RefreshCcw, Truck, Tv,
+  BarChart3, LineChart as LineChartIcon, Download, Eye, EyeOff, Smartphone, RefreshCcw, RotateCcw, Truck, Tv,
 
   ClipboardCheck, Sun, Moon, Home, ChevronDown
 
@@ -25,6 +25,7 @@ import { ComposedChart, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as R
 
 import WelcomeReleaseModal, { checkShouldAutoShowReleaseModal } from './components/WelcomeReleaseModal';
 import ModalConfirmacaoAbertura from './components/ModalConfirmacaoAbertura';
+import ModalConfirmacaoLogout from './components/ModalConfirmacaoLogout';
 
 import * as XLSX from 'xlsx';
 
@@ -319,8 +320,8 @@ const NavItem = ({ icon, label, isActive, onClick }) => (
     title={label}
     className={`w-full flex items-center justify-center group-hover:justify-start gap-0 group-hover:gap-3 px-0 group-hover:px-4 py-3 group-hover:py-2.5 rounded-2xl transition-all duration-300 relative overflow-hidden active:scale-95 mb-1 ${
       isActive 
-        ? 'bg-emerald-50 text-emerald-700 shadow-sm font-bold border border-emerald-100/50' 
-        : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800 font-medium border border-transparent'
+        ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 shadow-sm font-bold border border-emerald-100/50 dark:border-emerald-500/30' 
+        : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-800 dark:hover:text-slate-100 font-medium border border-transparent'
     }`}
   >
     <div className={`shrink-0 transition-transform duration-300 ${isActive ? 'scale-110' : ''}`}>
@@ -330,7 +331,7 @@ const NavItem = ({ icon, label, isActive, onClick }) => (
       {label}
     </span>
     {isActive && (
-       <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-1/2 bg-emerald-500 rounded-r-full shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+       <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-1/2 bg-emerald-500 rounded-r-full shadow-[0_0_12px_rgba(16,185,129,0.7)]"></div>
     )}
   </button>
 );
@@ -1327,13 +1328,13 @@ export default function App() {
       const { data: laudosData } = await supabase.from('veiculo_laudos').select('*').order('data_inclusao', { ascending: false });
       if (laudosData) setLaudosGeral(laudosData);
 
-      // Busca otimizada de chamados (campos físicos selecionados + ordenação JS para máxima performance)
+      // Busca otimizada e rápida dos chamados (sem colunas pesadas de fotos base64 para evitar timeout)
       const fieldsChamados = 'id,placa,numero,dataAbertura,dataHoraFechamento,situacaoVeiculo,oficinaExterna,status,pendencia,defeitoEncontrado,motorista,defeitoPrincipal,etapaWorkflow,naoImpeditivo,prejuizoAcumulado,oficinaDestino,regional,codigoChamado,alertas,hodometro,tipo_oficina,diagnostico_mecanico,pecas_necessarias,sub_fluxo_status,pedido_compras,data_envio_compras,observacao_compras,criado_por';
       let cData = null;
       let cErr = null;
 
       try {
-        const res = await supabase.from('chamados').select(fieldsChamados).limit(1000);
+        const res = await supabase.from('chamados').select(fieldsChamados).order('id', { ascending: false }).limit(1000);
         cData = res.data;
         cErr = res.error;
       } catch (err) {
@@ -1376,37 +1377,78 @@ export default function App() {
       if (configData && configData.length > 0) setConfigAcessos(configData);
 
       if (chamadosData && chamadosData.length > 0) {
-
         const mappedChamados = chamadosData.map(c => {
-
           let etapa = c.etapaWorkflow;
-
           if (!etapa || etapa === 'Aguardando Manutenção') {
-
             etapa = c.status === 'RESOLVIDO' ? 'RESOLVIDO' : 'Análise Frota';
-
+          }
+          if (etapa === 'Aguardando Descarregamento' || etapa === 'Aguardando Descarrego') {
+            etapa = 'Aguardando Desequipar';
           }
 
-          if (etapa === 'Aguardando Descarregamento' || etapa === 'Aguardando Descarrego') {
+          let defs = c.defeitos;
+          if (typeof defs === 'string') {
+            try { defs = JSON.parse(defs); } catch(e) {}
+          }
+          if ((!Array.isArray(defs) || defs.length === 0) && (c.defeitoEncontrado || c.defeitoPrincipal)) {
+            defs = [{
+              id: c.id || Date.now(),
+              descricao: c.defeitoEncontrado || c.defeitoPrincipal,
+              categoria: c.defeitoPrincipal || 'Geral',
+              status: c.status === 'RESOLVIDO' ? 'RESOLVIDO' : 'PENDENTE',
+              isImpeditivo: true
+            }];
+          }
 
-            etapa = 'Aguardando Desequipar';
+          let dWorkflow = c.dadosWorkflow || c.dados_workflow;
+          if (typeof dWorkflow === 'string') {
+            try { dWorkflow = JSON.parse(dWorkflow); } catch(e) {}
+          }
+          if (!dWorkflow || typeof dWorkflow !== 'object') dWorkflow = {};
 
+          if (c.tipo_oficina && !dWorkflow.tipoOficina) {
+            dWorkflow.tipoOficina = c.tipo_oficina;
+          }
+          if (c.diagnostico_mecanico && !dWorkflow.diagnosticoMecanico) {
+            dWorkflow.diagnosticoMecanico = c.diagnostico_mecanico;
+          }
+          if (c.pecas_necessarias && !dWorkflow.pecasNecessarias) {
+            dWorkflow.pecasNecessarias = c.pecas_necessarias;
+          }
+          if (c.sub_fluxo_status || c.pedido_compras || c.data_envio_compras || c.observacao_compras || dWorkflow.subFluxoOficina) {
+            dWorkflow.subFluxoOficina = {
+              status: c.sub_fluxo_status || dWorkflow.subFluxoOficina?.status || 'DIRETA',
+              pedidoCompras: c.pedido_compras || dWorkflow.subFluxoOficina?.pedidoCompras || null,
+              dataEnvioCompras: c.data_envio_compras || dWorkflow.subFluxoOficina?.dataEnvioCompras || null,
+              observacaoCompras: c.observacao_compras || dWorkflow.subFluxoOficina?.observacaoCompras || null,
+              ...(dWorkflow.subFluxoOficina || {})
+            };
+            if (c.sub_fluxo_status) {
+              dWorkflow.subFluxoOficina.status = c.sub_fluxo_status;
+            }
+            if (c.pedido_compras) {
+              dWorkflow.subFluxoOficina.pedidoCompras = c.pedido_compras;
+            }
+            if (c.data_envio_compras) {
+              dWorkflow.subFluxoOficina.dataEnvioCompras = c.data_envio_compras;
+            }
+            if (c.observacao_compras) {
+              dWorkflow.subFluxoOficina.observacaoCompras = c.observacao_compras;
+            }
+          }
+          if (c.hodometro !== undefined && c.hodometro !== null && !dWorkflow.hodometro) {
+            dWorkflow.hodometro = c.hodometro;
           }
 
           return {
-
             ...c,
-
+            defeitos: Array.isArray(defs) ? defs : [],
             etapaWorkflow: etapa,
-
-            dadosWorkflow: c.dadosWorkflow || {}
-
+            dadosWorkflow: dWorkflow
           };
-
         });
 
         setRawChamados(mappedChamados);
-
       }
 
       if (colabData && colabData.length > 0) setRawColaboradores(colabData);
@@ -1487,11 +1529,27 @@ export default function App() {
 
             setRawChamados(prev => prev.map(c => {
               if (c.id === payload.new.id) {
+                let dWf = payload.new.dadosWorkflow || c.dadosWorkflow || {};
+                if (typeof dWf === 'string') {
+                  try { dWf = JSON.parse(dWf); } catch(e) {}
+                }
+                if (payload.new.sub_fluxo_status || payload.new.pedido_compras || payload.new.data_envio_compras || payload.new.observacao_compras) {
+                  dWf = {
+                    ...dWf,
+                    subFluxoOficina: {
+                      ...(dWf.subFluxoOficina || {}),
+                      status: payload.new.sub_fluxo_status || dWf.subFluxoOficina?.status || 'DIRETA',
+                      pedidoCompras: payload.new.pedido_compras !== undefined ? payload.new.pedido_compras : (dWf.subFluxoOficina?.pedidoCompras || null),
+                      dataEnvioCompras: payload.new.data_envio_compras !== undefined ? payload.new.data_envio_compras : (dWf.subFluxoOficina?.dataEnvioCompras || null),
+                      observacaoCompras: payload.new.observacao_compras !== undefined ? payload.new.observacao_compras : (dWf.subFluxoOficina?.observacaoCompras || null)
+                    }
+                  };
+                }
                 return {
                   ...c,
                   ...payload.new,
                   etapaWorkflow: etapa,
-                  dadosWorkflow: payload.new.dadosWorkflow || c.dadosWorkflow || {}
+                  dadosWorkflow: dWf
                 };
               }
               return c;
@@ -1680,22 +1738,21 @@ export default function App() {
           payload.pecas_necessarias = payload.dadosWorkflow.pecasNecessarias;
         }
 
-        if (payload.sub_fluxo_status !== undefined && ['COMPRAS', 'FINANCEIRO', 'PAGO'].includes(payload.sub_fluxo_status)) {
+        if (payload.dadosWorkflow?.subFluxoOficina) {
+          const sf = payload.dadosWorkflow.subFluxoOficina;
+          if (sf.status) payload.sub_fluxo_status = sf.status;
+          if (sf.pedidoCompras !== undefined) payload.pedido_compras = sf.pedidoCompras;
+          if (sf.dataEnvioCompras !== undefined) payload.data_envio_compras = sf.dataEnvioCompras;
+          if (sf.observacaoCompras !== undefined) payload.observacao_compras = sf.observacaoCompras;
+        } else if (payload.sub_fluxo_status !== undefined) {
           payload.dadosWorkflow = {
             ...(payload.dadosWorkflow || {}),
             subFluxoOficina: {
               ...(payload.dadosWorkflow?.subFluxoOficina || {}),
-              status: payload.sub_fluxo_status
-            }
-          };
-        }
-
-        if (payload.pedido_compras !== undefined) {
-          payload.dadosWorkflow = {
-            ...(payload.dadosWorkflow || {}),
-            subFluxoOficina: {
-              ...(payload.dadosWorkflow?.subFluxoOficina || {}),
-              pedidoCompras: payload.pedido_compras
+              status: payload.sub_fluxo_status,
+              pedidoCompras: payload.pedido_compras !== undefined ? payload.pedido_compras : null,
+              dataEnvioCompras: payload.data_envio_compras !== undefined ? payload.data_envio_compras : null,
+              observacaoCompras: payload.observacao_compras !== undefined ? payload.observacao_compras : null
             }
           };
         }
@@ -2270,7 +2327,13 @@ export default function App() {
 
 
 
+  const [showLogoutConfirmApp, setShowLogoutConfirmApp] = useState(false);
+  const promptLogoutApp = () => {
+    setShowLogoutConfirmApp(true);
+  };
+
   const handleLogout = () => {
+    setShowLogoutConfirmApp(false);
     if (currentUser?.id || currentUser?.login) {
       const uId = currentUser.id || currentUser.login;
       sessionStorage.removeItem('welcome_modal_dismissed_' + uId);
@@ -3023,7 +3086,7 @@ export default function App() {
   }
 
   if (currentUser?.perfil?.toUpperCase() === 'MECANICO') {
-    return <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} />;
+    return <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} theme={theme} setTheme={setTheme} onLogout={handleLogout} />;
   }
 
   if (activeTab === 'painel_tv') {
@@ -3043,7 +3106,17 @@ export default function App() {
     userPermissions &&
     (userPermissions.temAcessoLiberado === false || (userPermissions.modulos_visiveis || []).filter(m => m !== 'meu_perfil').length === 0)
   ) {
-    return <AguardandoAcessoView currentUser={currentUser} onLogout={handleLogout} />;
+    return (
+      <>
+        <AguardandoAcessoView currentUser={currentUser} onLogout={promptLogoutApp} />
+        <ModalConfirmacaoLogout
+          isOpen={showLogoutConfirmApp}
+          onClose={() => setShowLogoutConfirmApp(false)}
+          onConfirm={handleLogout}
+          currentUser={currentUser}
+        />
+      </>
+    );
   }
 
   // ===== MOBILE / TABLET LAYOUT =====
@@ -3055,7 +3128,7 @@ export default function App() {
         {activeTab === 'calendario' && <CalendarioOperacionalView currentUser={currentUser} activeRegional={activeRegional} />}
         {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
         {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} />}
-        {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} />}
+        {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
         {activeTab === 'frota' && <FrotaView vehicles={vehicles} laudosGeral={laudosGeral} onSelectVehicle={(v) => { setSelectedVehicle(v); setActiveTab('detalhes_veiculo'); }} userPermissions={userPermissions} />}
         {activeTab === 'ociosidade_frota' && <OciosidadeView vehicles={vehicles} chamados={chamados} hoje={hoje} />}
         {activeTab === 'meu_perfil' && <PerfilView currentUser={currentUser} chamados={chamados} vehicles={vehicles} onUpdateProfile={handleUpdateProfile} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} />}
@@ -3096,11 +3169,13 @@ export default function App() {
         <MobileShell
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          activeRegional={activeRegional}
+          setActiveRegional={setActiveRegional}
           currentUser={currentUser}
           userPermissions={userPermissions}
           theme={theme}
           setTheme={setTheme}
-          onLogout={handleLogout}
+          onLogout={promptLogoutApp}
           setIsNovoChamadoModalOpen={setIsNovoChamadoModalOpen}
         >
           {mobileContent}
@@ -3128,26 +3203,36 @@ export default function App() {
             }} 
           />
         )}
+        <ModalConfirmacaoLogout
+          isOpen={showLogoutConfirmApp}
+          onClose={() => setShowLogoutConfirmApp(false)}
+          onConfirm={handleLogout}
+          currentUser={currentUser}
+        />
         <CustomFeedbackModal {...feedbackModal} />
       </div>
     );
   }
 
-  // ===== DESKTOP LAYOUT (unchanged) =====
+  // ===== DESKTOP LAYOUT =====
   return (
-    <div className="flex h-screen bg-[#F5F3FF] font-sans text-blue-950">
+    <div className={`flex h-screen font-sans ${theme === 'dark' ? 'dark bg-[#030712] text-slate-100' : 'bg-[#F5F3FF] text-blue-950'}`}>
 
       {/* Sidebar */}
       {currentUser?.perfil?.toUpperCase() !== 'MECANICO' && (
-      <aside className="w-[80px] hover:w-[280px] group transition-all duration-300 ease-in-out bg-white border-r border-emerald-100 flex flex-col p-2 group-hover:p-4 shrink-0 shadow-[4px_0_24px_rgba(139,92,246,0.05)] z-20 overflow-hidden relative">
+      <aside className={`w-[80px] hover:w-[280px] group transition-all duration-300 ease-in-out border-r flex flex-col p-2 group-hover:p-4 shrink-0 z-20 overflow-hidden relative ${
+        theme === 'dark' 
+          ? 'bg-slate-900/90 border-slate-800/80 text-slate-100 shadow-[4px_0_24px_rgba(0,0,0,0.5)] backdrop-blur-2xl' 
+          : 'bg-white border-emerald-100 text-blue-950 shadow-[4px_0_24px_rgba(139,92,246,0.05)]'
+      }`}>
 
         <div className="mb-8 px-1 py-4 flex items-center gap-3 overflow-hidden shrink-0">
-          <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-[18px] flex shrink-0 items-center justify-center shadow-lg shadow-emerald-200">
+          <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-[18px] flex shrink-0 items-center justify-center shadow-lg shadow-emerald-200 dark:shadow-emerald-950/40">
             <Zap size={24} className="text-white fill-white/20" />
           </div>
           <div className="flex flex-col opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap overflow-hidden">
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Sistema</span>
-            <h1 className="text-base font-black text-blue-950 tracking-tight mt-1">Controle <span className="text-emerald-600">Operacional</span></h1>
+            <h1 className="text-base font-black text-blue-950 dark:text-slate-100 tracking-tight mt-1">Controle <span className="text-emerald-600 dark:text-emerald-400">Operacional</span></h1>
           </div>
         </div>
 
@@ -3234,25 +3319,20 @@ export default function App() {
                 <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 truncate">{currentUser.perfil}</p>
               </div>
            </div>
-           <button onClick={handleLogout} className="w-full flex items-center justify-center group-hover:justify-start gap-0 group-hover:gap-3 px-2 group-hover:px-4 py-2.5 text-[13px] font-bold text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"><LogOut size={20} className="shrink-0"/> <span className="w-0 group-hover:w-auto overflow-hidden opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap tracking-wide">Sair do Sistema</span></button>
+           <button onClick={promptLogoutApp} className="w-full flex items-center justify-center group-hover:justify-start gap-0 group-hover:gap-3 px-2 group-hover:px-4 py-2.5 text-[13px] font-bold text-rose-500 hover:bg-rose-50 rounded-2xl transition-all cursor-pointer"><LogOut size={20} className="shrink-0"/> <span className="w-0 group-hover:w-auto overflow-hidden opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap tracking-wide">Sair do Sistema</span></button>
         </div>
       </aside>
       )}
 
- {/* Main Content */}
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
 
-        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-emerald-100/50 flex items-center justify-between px-10 shadow-sm z-10 shrink-0">
+        <header className="h-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-emerald-100/50 dark:border-slate-800/80 flex items-center justify-between px-10 shadow-sm z-10 shrink-0">
 
           <div>
-
-             <h2 className="text-2xl font-black text-blue-950 tracking-tight">
-
+             <h2 className="text-2xl font-black text-blue-950 dark:text-slate-100 tracking-tight">
                {activeTab === 'inicio' ? "Área de Trabalho" : activeTab === 'dashboard' ? `Olá ${currentUser.nome.split(' ')[0]}, Bem-Vindo!` : activeTab.replace('_', ' ').toUpperCase()}
-
              </h2>
-
           </div>
 
           <div className="flex gap-3 items-center">
@@ -3327,13 +3407,6 @@ export default function App() {
 
 
 
-            {activeTab === 'chamados' && currentUser && (
-
-              <>{userPermissions?.permissoes_edicao?.pode_abrir_chamado && (<button onClick={() => setIsNovoChamadoModalOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-full text-sm font-bold transition-all shadow-lg shadow-emerald-200 flex items-center gap-2 active:scale-95">
-            <Plus size={20} /> Novo Chamado
-          </button>)}</>
-
-            )}
 
             {activeTab === 'frota' && (
 
@@ -3371,7 +3444,7 @@ export default function App() {
 
           {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} />}
 
-          {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} />}
+          {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
 
           {activeTab === 'frota' && <FrotaView vehicles={vehicles} laudosGeral={laudosGeral} onSelectVehicle={(v) => { setSelectedVehicle(v); setActiveTab('detalhes_veiculo'); }} userPermissions={userPermissions} />}
 
@@ -3474,6 +3547,13 @@ export default function App() {
           }} 
         />
       )}
+
+      <ModalConfirmacaoLogout
+        isOpen={showLogoutConfirmApp}
+        onClose={() => setShowLogoutConfirmApp(false)}
+        onConfirm={handleLogout}
+        currentUser={currentUser}
+      />
 
       <CustomFeedbackModal {...feedbackModal} />
 
@@ -3782,6 +3862,7 @@ function MatrizAcessosView({ currentUser, onUpdateConfigAcessos, showFeedback })
     { id: 'pode_editar_acessos', label: 'Gerir Acessos (Usuários e Matriz)' },
     { id: 'pode_alterar_etapa_manual', label: 'Alteração Manual de Etapa (Gestão)' },
     { id: 'pode_concluir_chamado_oficina', label: 'Concluir Manutenção Oficina (Interna / Externa)' },
+    { id: 'pode_avaliar_solicitacao_liberacao', label: 'Avaliar Solicitação de Liberação de Oficina (Aprovar / Devolver)' },
     { id: 'pode_movimentar_oficinas', label: 'Movimentar Veículos entre Oficinas (Interna ⇄ Externa)' },
     { id: 'pode_configurar_buckets', label: 'WFM: Configurar / Gerenciar Buckets (Hierarquia, Inativação e Exclusão)' },
     { id: 'pode_editar_os_wfm', label: 'WFM: Editar OS / Atividades' },
@@ -5079,6 +5160,8 @@ function InicioView({ vehicles, chamados, rawChamados, hoje, currentUser, setAct
         if (c?.dadosWorkflow?.subFluxoOficina?.status === 'PAGO') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
         return 'bg-fuchsia-100 dark:bg-fuchsia-950/40 text-fuchsia-700 dark:text-fuchsia-300 border border-fuchsia-200 dark:border-fuchsia-900/50';
 
+      case 'Aguardando Validação Frota': return 'bg-cyan-100 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-900/50';
+
       default: return 'bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-350 border border-slate-200 dark:border-slate-800';
 
     }
@@ -6095,7 +6178,6 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
 
   const [showMotoristasDetalhe, setShowMotoristasDetalhe] = useState(false);
   const [showPlacasDetalhe, setShowPlacasDetalhe] = useState(false);
-
   const getPlacasQuebradas = useMemo(() => {
     if (dispPeriodo === 'atual') {
       return new Set(chamados.filter(c => c.status === 'ABERTO').map(c => c.placa));
@@ -6103,6 +6185,24 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
     const dias = dispPeriodo === '30dias' ? 30 : 60;
     const corte = new Date(hoje); corte.setDate(corte.getDate() - dias);
     return new Set(chamados.filter(c => new Date(c.dataAbertura) >= corte).map(c => c.placa));
+  }, [chamados, hoje, dispPeriodo]);
+
+  const getPlacasImpeditivas = useMemo(() => {
+    if (dispPeriodo === 'atual') {
+      return new Set(chamados.filter(c => c.status === 'ABERTO' && (c.situacaoVeiculo || 'RODANDO') === 'PARADO' && !c.naoImpeditivo).map(c => c.placa));
+    }
+    const dias = dispPeriodo === '30dias' ? 30 : 60;
+    const corte = new Date(hoje); corte.setDate(corte.getDate() - dias);
+    return new Set(chamados.filter(c => new Date(c.dataAbertura) >= corte && (c.situacaoVeiculo || 'RODANDO') === 'PARADO' && !c.naoImpeditivo).map(c => c.placa));
+  }, [chamados, hoje, dispPeriodo]);
+
+  const getPlacasNaoImpeditivas = useMemo(() => {
+    if (dispPeriodo === 'atual') {
+      return new Set(chamados.filter(c => c.status === 'ABERTO' && ((c.situacaoVeiculo || 'RODANDO') === 'RODANDO' || c.naoImpeditivo)).map(c => c.placa));
+    }
+    const dias = dispPeriodo === '30dias' ? 30 : 60;
+    const corte = new Date(hoje); corte.setDate(corte.getDate() - dias);
+    return new Set(chamados.filter(c => new Date(c.dataAbertura) >= corte && ((c.situacaoVeiculo || 'RODANDO') === 'RODANDO' || c.naoImpeditivo)).map(c => c.placa));
   }, [chamados, hoje, dispPeriodo]);
 
   // Veículos filtrados pelo tipo selecionado e tipo de contrato
@@ -6315,37 +6415,39 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
   const calcDisp = (grupo) => {
     const total = grupo.length;
     const quebrados = grupo.filter(v => getPlacasQuebradas.has(v.placa)).length;
+    const impeditivos = grupo.filter(v => getPlacasImpeditivas.has(v.placa)).length;
+    const naoImpeditivos = grupo.filter(v => getPlacasNaoImpeditivas.has(v.placa)).length;
     const disponiveis = total - quebrados;
     const percDisp = total > 0 ? (disponiveis / total) * 100 : 100;
     const percIndisp = total > 0 ? (quebrados / total) * 100 : 0;
-    return { total, quebrados, disponiveis, percentual: percDisp, percentualIndisp: percIndisp };
+    return { total, quebrados, disponiveis, impeditivos, naoImpeditivos, percentual: percDisp, percentualIndisp: percIndisp };
   };
 
-  const dispGeral = useMemo(() => calcDisp(vehiclesFiltrados), [vehiclesFiltrados, getPlacasQuebradas]);
+  const dispGeral = useMemo(() => calcDisp(vehiclesFiltrados), [vehiclesFiltrados, getPlacasQuebradas, getPlacasImpeditivas, getPlacasNaoImpeditivas]);
 
   const dispPorLocadora = useMemo(() => {
     const grupos = {};
     vehiclesFiltrados.forEach(v => { const k = v.locadora || 'Sem Locadora'; if (!grupos[k]) grupos[k] = []; grupos[k].push(v); });
     return Object.entries(grupos).map(([nome, veics]) => ({ nome, ...calcDisp(veics) })).sort((a, b) => a.percentual - b.percentual);
-  }, [vehiclesFiltrados, getPlacasQuebradas]);
+  }, [vehiclesFiltrados, getPlacasQuebradas, getPlacasImpeditivas, getPlacasNaoImpeditivas]);
 
   const dispPorTurno = useMemo(() => {
     const grupos = {};
     vehiclesFiltrados.forEach(v => { const k = v.turno || 'Indefinido'; if (!grupos[k]) grupos[k] = []; grupos[k].push(v); });
     return Object.entries(grupos).map(([nome, veics]) => ({ nome, ...calcDisp(veics) })).sort((a, b) => a.percentual - b.percentual);
-  }, [vehiclesFiltrados, getPlacasQuebradas]);
+  }, [vehiclesFiltrados, getPlacasQuebradas, getPlacasImpeditivas, getPlacasNaoImpeditivas]);
 
   const dispPorTipo = useMemo(() => {
     const grupos = {};
     vehiclesFiltrados.forEach(v => { const k = v.tipo || 'Outros'; if (!grupos[k]) grupos[k] = []; grupos[k].push(v); });
     return Object.entries(grupos).map(([nome, veics]) => ({ nome, ...calcDisp(veics) })).sort((a, b) => a.percentual - b.percentual);
-  }, [vehiclesFiltrados, getPlacasQuebradas]);
+  }, [vehiclesFiltrados, getPlacasQuebradas, getPlacasImpeditivas, getPlacasNaoImpeditivas]);
 
   const dispPorImplemento = useMemo(() => {
     const grupos = {};
     vehiclesFiltrados.forEach(v => { const k = v.implemento || 'Sem Implemento'; if (!grupos[k]) grupos[k] = []; grupos[k].push(v); });
     return Object.entries(grupos).map(([nome, veics]) => ({ nome, ...calcDisp(veics) })).sort((a, b) => a.percentual - b.percentual);
-  }, [vehiclesFiltrados, getPlacasQuebradas]);
+  }, [vehiclesFiltrados, getPlacasQuebradas, getPlacasImpeditivas, getPlacasNaoImpeditivas]);
 
   const getDispColor = (perc) => {
     const isIndisp = dispModo === 'indisponibilidade';
@@ -6668,7 +6770,7 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
             </div>
 
             {/* Stats */}
-            <div className="flex-1 grid grid-cols-3 gap-6 text-center md:text-left">
+            <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4 md:gap-5 text-center md:text-left">
               <div>
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Frota</p>
                 <p className="text-3xl font-black text-blue-950">{dispGeral.total}</p>
@@ -6680,6 +6782,14 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
               <div>
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{dispPeriodo === 'atual' ? 'C/ Chamado Aberto' : 'Afetados no Período'}</p>
                 <p className="text-3xl font-black text-rose-500">{dispGeral.quebrados}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{dispPeriodo === 'atual' ? 'Chamados Impeditivos' : 'Impeditivos'}</p>
+                <p className="text-3xl font-black text-red-600">{dispGeral.impeditivos}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{dispPeriodo === 'atual' ? 'Não Impeditivos' : 'Não Impeditivos'}</p>
+                <p className="text-3xl font-black text-amber-500">{dispGeral.naoImpeditivos}</p>
               </div>
             </div>
           </div>
@@ -7474,12 +7584,9 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
 
       )}
 
-
-
       {modalHistoricoPlaca && (() => {
         const targetPlaca = modalHistoricoPlaca.trim().toUpperCase();
         const chamadosVeiculo = (rawChamados || chamados || []).filter(c => (c.placa || '').trim().toUpperCase() === targetPlaca).sort((a,b) => new Date(b.dataAbertura) - new Date(a.dataAbertura));
-
         return (
           <div className="fixed inset-0 bg-blue-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
              <div className="bg-white rounded-[2rem] w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -7499,7 +7606,7 @@ function DashboardView({ vehicles, chamados, rawChamados, hoje, currentUser, isW
                      Nenhum chamado registrado para este veículo.
                    </div>
                  ) : (
-                   paginatedVehChamados.map(c => (
+                   chamadosVeiculo.map(c => (
                      <div key={c.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
                        <div className="flex justify-between items-start mb-3">
                          <div className="flex items-center gap-2">
@@ -10000,7 +10107,7 @@ function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
 
 
 
-          const isInternal = c.dadosWorkflow?.tipoOficina === 'Interna' || c.etapaWorkflow === 'Oficina Interna';
+          const isInternal = c.dadosWorkflow?.tipoOficina === 'Interna' || c.etapaWorkflow === 'Oficina Interna' || c.etapaWorkflow === 'Aguardando Validação Frota';
 
           const steps = isInternal 
 
@@ -10009,6 +10116,8 @@ function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
                 { id: 'Análise Frota', label: 'Análise', icon: Wrench },
 
                 { id: 'Oficina Interna', label: 'Oficina Int', icon: Home },
+
+                { id: 'Aguardando Validação Frota', label: 'Validação Frota', icon: ClipboardCheck },
 
                 { id: 'Liberado Operação', label: 'Liberado', icon: PlayCircle },
 
@@ -10277,25 +10386,29 @@ function HistoricoView({ chamados, vehicles, hoje, onEditar, onLiberar }) {
                       )}
 
                       {/* BOLINHAS DO SUB-FLUXO */}
-                      {step.id === 'Oficina Interna' && c.dadosWorkflow?.subFluxoOficina && ['COMPRAS', 'FINANCEIRO', 'PAGO'].includes(c.dadosWorkflow.subFluxoOficina.status) && (
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 flex flex-col items-center z-50">
-                          <div className="w-0.5 h-3 bg-slate-200 mb-1"></div>
-                          <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${c.dadosWorkflow.subFluxoOficina.status === 'COMPRAS' ? 'bg-amber-500 text-white border-amber-500 ring-2 ring-amber-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
-                            <Briefcase size={8} />
-                          </div>
-                          <span className={`text-[6px] font-black uppercase mb-1 ${c.dadosWorkflow.subFluxoOficina.status === 'COMPRAS' ? 'text-amber-600' : 'text-emerald-600'}`}>Compras</span>
+                      {step.id === 'Oficina Interna' && (() => {
+                        const sfStatus = c.dadosWorkflow?.subFluxoOficina?.status || c.sub_fluxo_status;
+                        if (!['COMPRAS', 'FINANCEIRO', 'PAGO'].includes(sfStatus)) return null;
+                        return (
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 flex flex-col items-center z-50">
+                            <div className="w-0.5 h-3 bg-slate-200 mb-1"></div>
+                            <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${sfStatus === 'COMPRAS' ? 'bg-amber-500 text-white border-amber-500 ring-2 ring-amber-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
+                              <Briefcase size={8} />
+                            </div>
+                            <span className={`text-[6px] font-black uppercase mb-1 ${sfStatus === 'COMPRAS' ? 'text-amber-600' : 'text-emerald-600'}`}>Compras</span>
 
-                          {(c.dadosWorkflow.subFluxoOficina.status === 'FINANCEIRO' || c.dadosWorkflow.subFluxoOficina.status === 'PAGO') && (
-                            <>
-                              <div className="w-0.5 h-2 bg-slate-200 -mt-1 mb-1"></div>
-                              <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${c.dadosWorkflow.subFluxoOficina.status === 'FINANCEIRO' ? 'bg-blue-500 text-white border-blue-500 ring-2 ring-blue-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
-                                <DollarSign size={8} />
-                              </div>
-                              <span className={`text-[6px] font-black uppercase ${c.dadosWorkflow.subFluxoOficina.status === 'FINANCEIRO' ? 'text-blue-600' : 'text-emerald-600'}`}>Finan</span>
-                            </>
-                          )}
-                        </div>
-                      )}
+                            {(sfStatus === 'FINANCEIRO' || sfStatus === 'PAGO') && (
+                              <>
+                                <div className="w-0.5 h-2 bg-slate-200 -mt-1 mb-1"></div>
+                                <div className={`w-4 h-4 rounded-full flex items-center justify-center mb-1 shadow-sm border ${sfStatus === 'FINANCEIRO' ? 'bg-blue-500 text-white border-blue-500 ring-2 ring-blue-100 animate-pulse' : 'bg-emerald-500 text-white border-emerald-500'}`}>
+                                  <DollarSign size={8} />
+                                </div>
+                                <span className={`text-[6px] font-black uppercase ${sfStatus === 'FINANCEIRO' ? 'text-blue-600' : 'text-emerald-600'}`}>Finan</span>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                   );
@@ -10439,13 +10552,29 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
           const logsUnificados = Array.from(mapHistorico.values()).sort((a, b) => new Date(b.dataHora || 0) - new Date(a.dataHora || 0));
 
+          let dWf = cData.dadosWorkflow || prev.dadosWorkflow || {};
+          if (typeof dWf === 'string') {
+            try { dWf = JSON.parse(dWf); } catch(e) {}
+          }
+          if (!dWf.subFluxoOficina && (cData.sub_fluxo_status || prev.sub_fluxo_status)) {
+            dWf = {
+              ...dWf,
+              subFluxoOficina: {
+                status: cData.sub_fluxo_status || prev.sub_fluxo_status || 'DIRETA',
+                pedidoCompras: cData.pedido_compras !== undefined ? cData.pedido_compras : (prev.pedido_compras || null),
+                dataEnvioCompras: cData.data_envio_compras !== undefined ? cData.data_envio_compras : (prev.data_envio_compras || null),
+                observacaoCompras: cData.observacao_compras !== undefined ? cData.observacao_compras : (prev.observacao_compras || null)
+              }
+            };
+          }
+
           setFormData(prev => ({
             ...prev,
             ...cData,
             hodometro: cData.hodometro !== null && cData.hodometro !== undefined ? String(cData.hodometro) : (cData.dadosWorkflow?.hodometro || prev.hodometro || ''),
             fotosChamado: cData.dadosWorkflow?.fotosChamado || cData.fotosChamado || prev.fotosChamado || {},
             dataAbertura: formatToDatetimeLocal(cData.dataAbertura || prev.dataAbertura),
-            dadosWorkflow: cData.dadosWorkflow || prev.dadosWorkflow || {},
+            dadosWorkflow: dWf,
             historicoModificacoes: logsUnificados
           }));
         }
@@ -10469,12 +10598,24 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
           }];
         }
       }
+
+      const subFluxoInit = chamadoEdicao.dadosWorkflow?.subFluxoOficina || (chamadoEdicao.sub_fluxo_status ? {
+        status: chamadoEdicao.sub_fluxo_status,
+        pedidoCompras: chamadoEdicao.pedido_compras || null,
+        dataEnvioCompras: chamadoEdicao.data_envio_compras || null,
+        observacaoCompras: chamadoEdicao.observacao_compras || null
+      } : null);
+
       return {
         ...chamadoEdicao,
         hodometro: chamadoEdicao.dadosWorkflow?.hodometro || chamadoEdicao.hodometro || '',
         fotosChamado: chamadoEdicao.dadosWorkflow?.fotosChamado || chamadoEdicao.fotosChamado || {},
         defeitos: legacyDefeitos || [],
-        dataAbertura: formatToDatetimeLocal(chamadoEdicao.dataAbertura)
+        dataAbertura: formatToDatetimeLocal(chamadoEdicao.dataAbertura),
+        dadosWorkflow: {
+          ...(chamadoEdicao.dadosWorkflow || {}),
+          ...(subFluxoInit ? { subFluxoOficina: subFluxoInit } : {})
+        }
       };
     }
 
@@ -10503,18 +10644,27 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   const [novoDefeitoECar, setNovoDefeitoECar] = useState('');
   const [novoDefeitoFoto, setNovoDefeitoFoto] = useState(null);
 
-  const [comprasPedido, setComprasPedido] = useState('');
-  const [financeiroPrevisao, setFinanceiroPrevisao] = useState('');
-  const [comprasObservacao, setComprasObservacao] = useState('');
-  const [financeiroObservacao, setFinanceiroObservacao] = useState('');
+  const [comprasPedido, setComprasPedido] = useState(() => chamadoEdicao?.dadosWorkflow?.subFluxoOficina?.pedidoCompras || chamadoEdicao?.pedido_compras || '');
+  const [financeiroPrevisao, setFinanceiroPrevisao] = useState(() => chamadoEdicao?.dadosWorkflow?.subFluxoOficina?.previsaoPagamento || '');
+  const [comprasObservacao, setComprasObservacao] = useState(() => chamadoEdicao?.dadosWorkflow?.subFluxoOficina?.observacaoCompras || chamadoEdicao?.observacao_compras || '');
+  const [financeiroObservacao, setFinanceiroObservacao] = useState(() => chamadoEdicao?.dadosWorkflow?.subFluxoOficina?.observacaoFinanceiro || '');
 
   const [modalRetornoInternaOpen, setModalRetornoInternaOpen] = useState(false);
   const [motivoRetornoInterna, setMotivoRetornoInterna] = useState('');
 
+  const [modalDevolucaoOficinaOpen, setModalDevolucaoOficinaOpen] = useState(false);
+  const [motivoDevolucaoOficina, setMotivoDevolucaoOficina] = useState('');
+  const [defeitosParaDevolver, setDefeitosParaDevolver] = useState([]);
+
   const [modalTransferenciaExternaOpen, setModalTransferenciaExternaOpen] = useState(false);
   const [oficinaDestinoExterna, setOficinaDestinoExterna] = useState('');
   const [motivoTransferenciaExterna, setMotivoTransferenciaExterna] = useState('');
-  const subFluxo = formData.dadosWorkflow?.subFluxoOficina;
+  const subFluxo = formData.dadosWorkflow?.subFluxoOficina || (formData.sub_fluxo_status ? {
+    status: formData.sub_fluxo_status,
+    pedidoCompras: formData.pedido_compras || null,
+    dataEnvioCompras: formData.data_envio_compras || null,
+    observacaoCompras: formData.observacao_compras || null
+  } : null);
 
   const [transitionComment, setTransitionComment] = useState('');
   const [selectedOficina, setSelectedOficina] = useState(formData.oficinaDestino || formData.dadosWorkflow?.oficinaDestino || '');
@@ -10624,9 +10774,22 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   };
 
   const handleSubFluxoAction = (newStatus, extrasDesc = '', additionalData = {}) => {
-    const atual = formData.dadosWorkflow?.subFluxoOficina || {};
-    const { dadosWorkflow: _ignorar, ...cleanAdditional } = additionalData;
-    const novoSubFluxo = { ...atual, status: newStatus, ...cleanAdditional };
+    const atual = formData.dadosWorkflow?.subFluxoOficina || {
+      status: formData.sub_fluxo_status || 'DIRETA',
+      pedidoCompras: formData.pedido_compras || null,
+      dataEnvioCompras: formData.data_envio_compras || null,
+      observacaoCompras: formData.observacao_compras || null
+    };
+
+    const nestedSubFluxo = additionalData.dadosWorkflow?.subFluxoOficina || additionalData.subFluxoOficina || {};
+    const { dadosWorkflow: _ignorar, subFluxoOficina: _ignorar2, ...directExtras } = additionalData;
+
+    const novoSubFluxo = {
+      ...atual,
+      ...directExtras,
+      ...nestedSubFluxo,
+      status: newStatus
+    };
     
     if (onWorkflowTransition && isEditing) {
       let finalDesc = `Sub-fluxo Oficina atualizado para: ${newStatus}. ${extrasDesc}`;
@@ -10636,14 +10799,23 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
       const payloadExtras = {
         sub_fluxo_status: newStatus,
-        pedido_compras: cleanAdditional.pedidoCompras || formData.pedido_compras || atual.pedidoCompras || null,
-        observacao_compras: cleanAdditional.observacaoCompras || formData.observacao_compras || atual.observacaoCompras || null,
-        data_envio_compras: cleanAdditional.dataEnvioCompras || formData.data_envio_compras || atual.dataEnvioCompras || null,
+        pedido_compras: novoSubFluxo.pedidoCompras || null,
+        observacao_compras: novoSubFluxo.observacaoCompras || null,
+        data_envio_compras: novoSubFluxo.dataEnvioCompras || null,
         dadosWorkflow: {
           ...(formData.dadosWorkflow || {}),
           subFluxoOficina: novoSubFluxo
         }
       };
+
+      setFormData(prev => ({
+        ...prev,
+        ...payloadExtras,
+        dadosWorkflow: {
+          ...(prev.dadosWorkflow || {}),
+          subFluxoOficina: novoSubFluxo
+        }
+      }));
 
       onWorkflowTransition(formData.id, formData.etapaWorkflow, finalDesc, payloadExtras);
       setTransitionComment('');
@@ -10745,6 +10917,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   // Permissões granulares de manutenção e movimentação
   const podeConcluirOficina = userPermissions?.permissoes_edicao?.pode_concluir_chamado_oficina === true || isFrota || isCoord;
   const podeMovimentarOficinas = userPermissions?.permissoes_edicao?.pode_movimentar_oficinas === true || isFrota || isCoord;
+  const podeAvaliarSolicitacaoLiberacao = userPermissions?.permissoes_edicao?.pode_avaliar_solicitacao_liberacao === true || isFrota || isCoord || isAdminOrGerente;
 
   // Compliance estrito: Apenas a OPERAÇÃO (Supervisor, Coordenador, Analista de Operação, Gerente, Administrador), Gerente ou Administrador pode desequipar e aceitar o veículo
   // Usuários do setor FROTA NÃO podem confirmar desequipagem nem aprovar/aceitar o veículo final
@@ -10764,38 +10937,23 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
   const isAdminOrCoord = ['GERENTE', 'COORDENADOR', 'ADMINISTRADOR'].includes(currentUser?.perfil);
 
-
-
-  const isInternal = formData.dadosWorkflow?.tipoOficina === 'Interna' || formData.etapaWorkflow === 'Oficina Interna';
+  const isInternal = formData.dadosWorkflow?.tipoOficina === 'Interna' || formData.etapaWorkflow === 'Oficina Interna' || formData.etapaWorkflow === 'Aguardando Validação Frota';
 
   const steps = isInternal 
-
     ? [
-
         { id: 'Análise Frota', label: 'Análise', icon: Wrench },
-
         { id: 'Oficina Interna', label: 'Oficina Int', icon: Home },
-
+        { id: 'Aguardando Validação Frota', label: 'Validação Frota', icon: ClipboardCheck },
         { id: 'Liberado Operação', label: 'Liberado', icon: PlayCircle },
-
         { id: 'RESOLVIDO', label: 'Concluído', icon: CheckCircle2 }
-
       ]
-
     : [
-
         { id: 'Análise Frota', label: 'Análise', icon: Wrench },
-
         { id: 'Aguardando Desequipar', label: 'Desequipar', icon: Clock },
-
         { id: 'Desequipado - Entrada Oficina', label: 'Desequipado', icon: ClipboardCheck },
-
         { id: 'Oficina Externa', label: 'Oficina Ext', icon: Truck },
-
         { id: 'Liberado Operação', label: 'Liberado', icon: PlayCircle },
-
         { id: 'RESOLVIDO', label: 'Concluído', icon: CheckCircle2 }
-
       ];
 
 
@@ -11177,7 +11335,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
     ) : (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4">
 
-      <div className="bg-white rounded-none sm:rounded-[2rem] shadow-2xl w-full sm:max-w-2xl overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[90vh]">
+      <div className="bg-white rounded-none sm:rounded-[2rem] shadow-2xl w-full sm:max-w-2xl overflow-hidden flex flex-col h-dvh sm:h-auto sm:max-h-[90vh]">
 
         
 
@@ -11202,8 +11360,48 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
 
         {isEditing && (
+          <>
+            {/* Mobile Compact 3-Step Stepper */}
+            {(() => {
+              const currentIdx = steps.findIndex(s => s.id === getEtapaWorkflow(formData));
+              const prevStep = currentIdx > 0 ? steps[currentIdx - 1] : null;
+              const currStep = steps[currentIdx] || steps[0];
+              const nextStep = currentIdx < steps.length - 1 ? steps[currentIdx + 1] : null;
+              
+              return (
+                <div className="flex md:hidden flex-col w-full bg-slate-50 p-3 border-b border-slate-100 shrink-0">
+                  <div className="flex items-center justify-between gap-1 text-center">
+                    <div className="flex-1 flex flex-col items-center min-w-0 p-1.5 rounded-xl bg-white/80 border border-slate-100">
+                      <span className="text-[8px] font-black text-slate-400 uppercase">Anterior</span>
+                      <span className="text-[11px] font-bold text-slate-500 truncate w-full">
+                        {prevStep ? prevStep.label : '—'}
+                      </span>
+                    </div>
 
-          <div className="bg-slate-50 border-b border-slate-100 p-6 pb-28 shrink-0 overflow-visible">
+                    <ChevronRight size={14} className="text-slate-300 shrink-0" />
+
+                    <div className="flex-1 flex flex-col items-center min-w-0 p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 shadow-xs">
+                      <span className="text-[8px] font-black text-emerald-600 uppercase">Etapa Atual</span>
+                      <span className="text-xs font-black text-emerald-900 truncate w-full">
+                        {currStep ? currStep.label : 'Concluído'}
+                      </span>
+                    </div>
+
+                    <ChevronRight size={14} className="text-slate-300 shrink-0" />
+
+                    <div className="flex-1 flex flex-col items-center min-w-0 p-1.5 rounded-xl bg-white/80 border border-slate-100">
+                      <span className="text-[8px] font-black text-slate-400 uppercase">Próximo</span>
+                      <span className="text-[11px] font-bold text-slate-500 truncate w-full">
+                        {nextStep ? nextStep.label : '—'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Desktop Full Graphic Stepper */}
+            <div className="hidden md:block bg-slate-50 border-b border-slate-100 p-6 pb-28 shrink-0 overflow-visible">
 
             <div className="flex justify-between items-center relative">
 
@@ -11313,13 +11511,11 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
             </div>
 
-          </div>
-
+            </div>
+          </>
         )}
 
-
-
-        <div className="p-8 space-y-6 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-8 space-y-6 overflow-y-auto flex-1 pb-safe">
 
           
 
@@ -12270,6 +12466,108 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                   </div>
                 )}
 
+                {/* ── ETAPA: AGUARDANDO VALIDAÇÃO FROTA (SOLICITAÇÃO DE LIBERAÇÃO DO MECÂNICO) ── */}
+                {(formData.etapaWorkflow === 'Aguardando Validação Frota' || formData.dadosWorkflow?.solicitacaoLiberacao?.status === 'PENDENTE') && (
+                  <div className="w-full bg-purple-50/70 dark:bg-purple-950/40 p-5 rounded-2xl border border-purple-200 dark:border-purple-800/60 space-y-4 animate-in fade-in">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2.5 rounded-xl bg-purple-600 text-white shadow-md shadow-purple-500/20">
+                          <ClipboardCheck size={20} />
+                        </div>
+                        <div>
+                          <h5 className="text-sm font-black text-purple-950 dark:text-purple-100 flex items-center gap-2">
+                            Validação de Liberação Solicitada pelo Mecânico
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-purple-200 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300 uppercase">
+                              Aguardando Avaliação da Frota
+                            </span>
+                          </h5>
+                          <p className="text-xs text-purple-700 dark:text-purple-300 font-medium mt-0.5">
+                            Solicitante: <strong className="font-bold">{formData.dadosWorkflow?.solicitacaoLiberacao?.mecanicoNome || formData.dadosWorkflow?.solicitacaoLiberacao?.mecanico || 'Mecânico'}</strong>
+                            {formData.dadosWorkflow?.solicitacaoLiberacao?.dataSolicitacao && (
+                              <> • Data: {formatarDataBR(formData.dadosWorkflow.solicitacaoLiberacao.dataSolicitacao)}</>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Relatório Técnico do Mecânico */}
+                    <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-purple-100 dark:border-purple-800/40">
+                      <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 block mb-1">
+                        Relatório Técnico do Mecânico (Serviços Executados):
+                      </span>
+                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
+                        {formData.dadosWorkflow?.solicitacaoLiberacao?.relatorioTecnico || 'Nenhum comentário adicional informado pelo mecânico.'}
+                      </p>
+                    </div>
+
+                    {/* Galeria de Fotos dos Reparos (se houver) */}
+                    {Array.isArray(formData.dadosWorkflow?.solicitacaoLiberacao?.fotosReparo) && formData.dadosWorkflow.solicitacaoLiberacao.fotosReparo.filter(Boolean).length > 0 && (
+                      <div>
+                        <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 block mb-2">
+                          Fotos Comprobatórias dos Reparos ({formData.dadosWorkflow.solicitacaoLiberacao.fotosReparo.filter(Boolean).length}):
+                        </span>
+                        <div className="grid grid-cols-3 gap-3">
+                          {formData.dadosWorkflow.solicitacaoLiberacao.fotosReparo.filter(Boolean).map((fotoUrl, fIdx) => (
+                            <div 
+                              key={fIdx} 
+                              onClick={() => setSelectedImagePreview({ url: fotoUrl, label: `Foto Reparo #${fIdx + 1}` })}
+                              className="relative h-28 rounded-xl overflow-hidden border border-purple-200 dark:border-purple-800 cursor-pointer group hover:scale-[1.02] transition-transform shadow-xs"
+                            >
+                              <img src={fotoUrl} alt={`Foto Reparo ${fIdx + 1}`} className="w-full h-full object-cover" />
+                              <div className="absolute bottom-0 inset-x-0 bg-black/60 p-1 text-center">
+                                <span className="text-[9px] font-bold text-white uppercase">Foto #{fIdx + 1}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Decisões da Frota / Gestão */}
+                    {(isFrota || podeConcluirOficina || podeAvaliarSolicitacaoLiberacao) ? (
+                      <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const logMsg = `Frota (${currentUser?.nome || 'Usuário'}) avaliou e aprovou o relatório técnico do mecânico, liberando o veículo para Operação.`;
+                            handleWorkflowAction('Liberado Operação', logMsg, {
+                              dadosWorkflow: {
+                                ...(formData.dadosWorkflow || {}),
+                                solicitacaoLiberacao: {
+                                  ...(formData.dadosWorkflow?.solicitacaoLiberacao || {}),
+                                  status: 'APROVADA',
+                                  dataAprovacao: new Date().toISOString(),
+                                  aprovadoPor: currentUser?.nome || 'Frota'
+                                }
+                              }
+                            });
+                          }}
+                          className="w-full sm:flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                        >
+                          <CheckCircle2 size={16} /> Aprovar & Liberar para Operação
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMotivoDevolucaoOficina('');
+                            setDefeitosParaDevolver(formData.defeitos ? formData.defeitos.map(d => ({ ...d })) : []);
+                            setModalDevolucaoOficinaOpen(true);
+                          }}
+                          className="w-full sm:w-auto py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-lg shadow-rose-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                        >
+                          <RotateCcw size={16} /> Rejeitar / Devolver para Oficina
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-xs font-bold text-slate-500 bg-slate-200/50 dark:bg-slate-800 p-3 rounded-lg w-full flex items-center gap-2">
+                        <Clock size={14}/> Aguardando que a equipe de Frota avalie e aprove a solicitação de liberação do mecânico.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {formData.etapaWorkflow === 'Aguardando Desequipar' && (
 
                   <>
@@ -12480,6 +12778,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                       >
                         <option value="Análise Frota">Análise Frota</option>
                         <option value="Oficina Interna">Oficina Interna</option>
+                        <option value="Aguardando Validação Frota">Validação Frota</option>
                         <option value="Aguardando Desequipar">Aguardando Desequipar</option>
                         <option value="Desequipado - Entrada Oficina">Desequipado (Entrada Oficina)</option>
                         <option value="Oficina Externa">Oficina Externa</option>
@@ -12705,6 +13004,137 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
       </div>
     )}
 
+    {/* ★ MODAL SISTÊMICO: REJEITAR E DEVOLVER PARA OFICINA INTERNA (AVALIAÇÃO DA FROTA) */}
+    {modalDevolucaoOficinaOpen && (
+      <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[120] flex items-center justify-center p-4">
+        <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
+          <div className="bg-gradient-to-r from-rose-600 to-rose-800 p-6 text-white flex justify-between items-center shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20">
+                <RotateCcw size={22} className="text-white" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black tracking-tight">Devolver para Oficina Interna</h3>
+                <p className="text-xs text-rose-100 font-medium mt-0.5">Revisão de Reparos & Desmarcação de Defeitos</p>
+              </div>
+            </div>
+            <button 
+              type="button"
+              onClick={() => { setModalDevolucaoOficinaOpen(false); setMotivoDevolucaoOficina(''); }} 
+              className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/80 hover:text-white"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="p-6 space-y-4 flex-1 overflow-y-auto custom-scrollbar">
+            <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded-2xl p-4 flex gap-3 items-start">
+              <AlertTriangle size={18} className="text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-rose-900 dark:text-rose-200 font-medium leading-relaxed">
+                Você está devolvendo este chamado para a Oficina Interna. Desmarque abaixo os defeitos que ainda precisam de revisão e descreva o motivo para orientar o mecânico.
+              </p>
+            </div>
+
+            {/* Checklist de Defeitos para Revisão */}
+            {defeitosParaDevolver.length > 0 && (
+              <div className="space-y-2">
+                <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  Checklist de Defeitos (Clique para alternar Pendente / Resolvido):
+                </label>
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {defeitosParaDevolver.map((def, idx) => (
+                    <div 
+                      key={def.id || idx}
+                      onClick={() => {
+                        setDefeitosParaDevolver(prev => prev.map(d => 
+                          (d.id === def.id) ? { ...d, status: d.status === 'RESOLVIDO' ? 'PENDENTE' : 'RESOLVIDO' } : d
+                        ));
+                      }}
+                      className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                        def.status === 'RESOLVIDO' 
+                          ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30' 
+                          : 'border-rose-300 dark:border-rose-800 bg-rose-50/60 dark:bg-rose-950/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className={`w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center text-white ${
+                          def.status === 'RESOLVIDO' ? 'bg-emerald-500' : 'bg-rose-500'
+                        }`}>
+                          {def.status === 'RESOLVIDO' ? '✓' : '!'}
+                        </span>
+                        <div>
+                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{def.descricao}</p>
+                          <span className="text-[9px] font-mono text-slate-400 uppercase">{def.status}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Motivo da Devolução / O que precisa ser revisado? <span className="text-rose-500">*</span>
+              </label>
+              <textarea 
+                required
+                value={motivoDevolucaoOficina}
+                onChange={e => setMotivoDevolucaoOficina(e.target.value)}
+                placeholder="Descreva detalhadamente o motivo da devolução e os ajustes necessários..."
+                className="w-full p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-rose-500 h-28 resize-none"
+              />
+            </div>
+          </div>
+
+          <div className="p-4 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3 shrink-0">
+            <button 
+              type="button"
+              onClick={() => { setModalDevolucaoOficinaOpen(false); setMotivoDevolucaoOficina(''); }}
+              className="px-4 py-2.5 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl transition-colors"
+            >
+              Cancelar
+            </button>
+            <button 
+              type="button"
+              onClick={() => {
+                if (!motivoDevolucaoOficina.trim()) {
+                  alert('Por favor, informe o motivo da devolução para o mecânico.');
+                  return;
+                }
+                const logDesc = `Frota (${currentUser?.nome || 'Usuário'}) rejeitou a solicitação de liberação e devolveu o veículo para a Oficina Interna. Motivo: ${motivoDevolucaoOficina.trim()}`;
+                
+                handleWorkflowAction(
+                  'Oficina Interna',
+                  logDesc,
+                  {
+                    defeitos: defeitosParaDevolver,
+                    dadosWorkflow: {
+                      ...formData.dadosWorkflow,
+                      tipoOficina: 'Interna',
+                      motivoDevolucaoMecanico: motivoDevolucaoOficina.trim(),
+                      solicitacaoLiberacao: {
+                        ...(formData.dadosWorkflow?.solicitacaoLiberacao || {}),
+                        status: 'REJEITADA',
+                        dataRejeicao: new Date().toISOString(),
+                        rejeitadoPor: currentUser?.nome || 'Frota',
+                        motivoRejeicao: motivoDevolucaoOficina.trim()
+                      }
+                    }
+                  }
+                );
+                setModalDevolucaoOficinaOpen(false);
+                setMotivoDevolucaoOficina('');
+              }}
+              className="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-xl shadow-lg shadow-rose-500/20 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
+            >
+              <RotateCcw size={14} /> Confirmar Devolução
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {/* ★ MODAL SISTÊMICO: REDIRECIONAR PARA OFICINA EXTERNA */}
     {modalTransferenciaExternaOpen && (
       <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[120] flex items-center justify-center p-4">
@@ -12897,7 +13327,7 @@ function ModalNovoVeiculo({ onClose, onSubmit }) {
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4">
-      <div className="bg-white rounded-none sm:rounded-[2rem] shadow-2xl w-full sm:max-w-2xl overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[90vh]">
+      <div className="bg-white rounded-none sm:rounded-[2rem] shadow-2xl w-full sm:max-w-2xl overflow-hidden flex flex-col h-dvh sm:h-auto sm:max-h-[90vh]">
         <div className="px-4 sm:px-8 py-4 sm:py-6 bg-blue-950 flex justify-between items-center text-white shrink-0">
           <h2 className="text-lg sm:text-xl font-black">Cadastrar Novo Veículo</h2>
           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={20}/></button>
@@ -15196,7 +15626,7 @@ function ModalNovoColaborador({ onClose, onSubmit }) {
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4">
-      <div className="bg-white rounded-none sm:rounded-3xl shadow-2xl w-full sm:max-w-3xl overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[90vh]">
+      <div className="bg-white rounded-none sm:rounded-3xl shadow-2xl w-full sm:max-w-3xl overflow-hidden flex flex-col h-dvh sm:h-auto sm:max-h-[90vh]">
         {/* Header */}
         <div className="px-6 py-5 bg-blue-950 flex justify-between items-center text-white shrink-0">
           <div>
@@ -17771,9 +18201,10 @@ function PainelTVView({ vehicles, chamados, activeRegional, setActiveRegional, c
 
 
   const getTicketsForStage = (stage) => {
-
+    if (stage === 'Oficina Interna') {
+      return activeChamados.filter(c => ['Oficina Interna', 'Aguardando Validação Frota'].includes(getEtapaWorkflow(c)));
+    }
     return activeChamados.filter(c => getEtapaWorkflow(c) === stage);
-
   };
 
 
