@@ -83,7 +83,22 @@
 
 ---
 
-### 7. Status de Validação
-- **Build**: `npm run build` executado com sucesso (**0 erros**, `✓ built in 33.07s`).
-- **Capacitor**: `npx cap sync` sincronizado para Android e Web (`[info] Sync finished in 0.696s`).
+### 8. Restauração e Exibição Completa de Fotos no Painel do Mecânico (`MecanicoView.jsx`)
+- **Problema**: Ao abrir os Detalhes da OS no Painel do Mecânico (`detailChamado`), as fotos enviadas na abertura do chamado (evidências do defeito, fachada, hodômetro, fotos gerais) não estavam visíveis para o mecânico identificar a localização exata da avaria.
+- **Causa Raiz**:
+  1. No `handleOpenDetails`, o array `defeitos` não era submetido ao parser `parseDefs`, podendo vir vazio ou como string crua caso viesse de `dadosWorkflow`.
+  2. O modal de detalhes extraía fotos unicamente de `Object.entries(detailChamado.fotosChamado || {})`, ignorando fotos anexadas diretamente aos itens da lista de defeitos (`d.fotoDefeito`, `d.foto`, `d.fotoUrl`, `d.fotos`).
+  3. No card de cada defeito na seção *"Defeitos Reportados"*, não havia preview da foto da avaria.
+- **Implementação Realizada**:
+  - Em [MecanicoView.jsx](file:///c:/Users/robym/Desktop/Documentos/Analise%20de%20dados/fleet-operacao-app/src/components/MecanicoView.jsx):
+    1. **Parser Unificado no `handleOpenDetails`**: Hidratação imediata e via Supabase de todos os defeitos (`chamado.defeitos`, `dadosWorkflow.defeitos`) e fotos (`fotosChamado`, `fotosGerais`, `dadosWorkflow.fotosChamado`).
+    2. **Galeria de Evidências Fotográficas**: Unificação de todas as fotos gerais, fotos de defeitos individuais e fotos de reparos em `todasEvidencias`, com tags indicativas (*Veículo*, *Hodômetro*, *Defeito: Categoria/Descrição*), contagem total e clique para ampliação em tela cheia com zoom (`selectedImagePreview`).
+    3. **Foto no Card de Cada Defeito**: Renderização de thumbnail com botão *"Ampliar"* diretamente dentro do card do defeito reportado.
+    4. **Atalho de Foto no Checklist de Validação**: No modal de solicitação de liberação (`solicitarChamado`), cada defeito com foto agora possui o botão `[ 📷 Foto ]` para conferência imediata pelo mecânico durante a execução do reparo.
+
+---
+
+### 9. Status de Validação Local
+- **Build**: `npm run build` executado com sucesso (**0 erros**, `✓ built in 20.93s`).
+- **Capacitor**: `npx cap sync` sincronizado para Android e Web (`[info] Sync finished in 0.568s`).
 - **Git Push**: Em estrita conformidade com `.agents/AGENTS.md`, **nenhum push para o GitHub foi realizado**.

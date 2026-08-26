@@ -6,7 +6,7 @@ import {
   AlertCircle, X, ChevronRight, PlayCircle, Eye, ShieldAlert,
   Clock, Info, FileText, Check, MessageSquarePlus, MessageSquare, 
   History, User, LayoutGrid, List, LayoutTemplate, EyeOff, LogOut,
-  Sun, Moon, Send, Camera, Image, Trash2, ArrowLeft, RotateCcw
+  Sun, Moon, Send, Camera, Image, Trash2, ArrowLeft, RotateCcw, ZoomIn
 } from 'lucide-react';
 
 const LISTA_OFICINAS_BASE = [
@@ -239,7 +239,35 @@ export default function MecanicoView({
 
   // Actions - Detalhes e Comentários
   const handleOpenDetails = async (chamado) => {
-    setDetailChamado(chamado);
+    const parseDefs = (raw) => {
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === 'string') {
+        try { return JSON.parse(raw); } catch (e) { return []; }
+      }
+      return [];
+    };
+
+    let initialDefs = parseDefs(chamado.defeitos);
+    if (initialDefs.length === 0) {
+      initialDefs = parseDefs(chamado.dadosWorkflow?.defeitos);
+    }
+    if (initialDefs.length === 0 && (chamado.defeitoEncontrado || chamado.defeitoPrincipal)) {
+      initialDefs = [{
+        id: chamado.id || Date.now(),
+        descricao: chamado.defeitoEncontrado || chamado.defeitoPrincipal,
+        categoria: chamado.defeitoPrincipal || 'Geral',
+        status: chamado.status === 'RESOLVIDO' ? 'RESOLVIDO' : 'PENDENTE',
+        isImpeditivo: true
+      }];
+    }
+
+    const currentWithDefs = {
+      ...chamado,
+      defeitos: initialDefs,
+      fotosChamado: chamado.dadosWorkflow?.fotosChamado || chamado.fotosChamado || chamado.fotosGerais || {}
+    };
+
+    setDetailChamado(currentWithDefs);
     setNovoComentario('');
 
     try {
@@ -249,6 +277,20 @@ export default function MecanicoView({
       ]);
 
       if (data && !error) {
+        let dbDefs = parseDefs(data.defeitos);
+        if (dbDefs.length === 0) {
+          dbDefs = parseDefs(data.dadosWorkflow?.defeitos);
+        }
+        if (dbDefs.length === 0 && (data.defeitoEncontrado || data.defeitoPrincipal)) {
+          dbDefs = [{
+            id: data.id || Date.now(),
+            descricao: data.defeitoEncontrado || data.defeitoPrincipal,
+            categoria: data.defeitoPrincipal || 'Geral',
+            status: data.status === 'RESOLVIDO' ? 'RESOLVIDO' : 'PENDENTE',
+            isImpeditivo: true
+          }];
+        }
+
         const toIso = (dt) => { 
           try { 
             const d = new Date(dt); 
@@ -289,17 +331,15 @@ export default function MecanicoView({
         const logsUnificados = Array.from(mapHistorico.values()).sort((a, b) => new Date(b.dataHora || 0) - new Date(a.dataHora || 0));
 
         setDetailChamado(prev => {
-          if (prev && prev.id === chamado.id) {
-            return {
-              ...prev,
-              ...data,
-              hodometro: data.hodometro !== null && data.hodometro !== undefined ? data.hodometro : (data.dadosWorkflow?.hodometro || prev.hodometro),
-              fotosChamado: data.dadosWorkflow?.fotosChamado || data.fotosChamado || {},
-              defeitos: data.defeitos || [],
-              historicoModificacoes: logsUnificados
-            };
-          }
-          return prev;
+          if (!prev || prev.id !== chamado.id) return prev;
+          return {
+            ...prev,
+            ...data,
+            hodometro: data.hodometro !== null && data.hodometro !== undefined ? data.hodometro : (data.dadosWorkflow?.hodometro || prev.hodometro),
+            fotosChamado: data.dadosWorkflow?.fotosChamado || data.fotosChamado || data.fotosGerais || {},
+            defeitos: dbDefs,
+            historicoModificacoes: logsUnificados
+          };
         });
       }
     } catch (err) {
@@ -1356,39 +1396,58 @@ export default function MecanicoView({
                       <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Selecione todos os defeitos que foram reparados com sucesso.</p>
                       
                       <div className="space-y-2 mt-2">
-                        {(solicitarChamado.defeitos || []).map((def, idx) => (
-                          <div 
-                            key={def.id || idx}
-                            onClick={() => handleToggleDefeito(def.id)}
-                            className={`flex items-center justify-between p-3.5 rounded-[1.2rem] border cursor-pointer transition-all ${
-                              def.status === 'RESOLVIDO' 
-                                ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-950/40' 
-                                : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-black shrink-0 transition-all ${
-                                def.status === 'RESOLVIDO' ? 'bg-emerald-500 shadow-sm' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-300'
-                              }`}>
-                                {def.status === 'RESOLVIDO' ? <Check size={14}/> : idx + 1}
-                              </div>
-                              <div>
-                                <p className={`text-xs font-bold transition-colors ${
-                                  def.status === 'RESOLVIDO' ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-700 dark:text-slate-200'
+                        {(solicitarChamado.defeitos || []).map((def, idx) => {
+                          const fotoDef = def.fotoDefeito || def.foto || def.fotoUrl || (Array.isArray(def.fotos) && def.fotos[0]);
+                          return (
+                            <div 
+                              key={def.id || idx}
+                              onClick={() => handleToggleDefeito(def.id)}
+                              className={`flex items-center justify-between p-3.5 rounded-[1.2rem] border cursor-pointer transition-all ${
+                                def.status === 'RESOLVIDO' 
+                                  ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-950/40' 
+                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-black shrink-0 transition-all ${
+                                  def.status === 'RESOLVIDO' ? 'bg-emerald-500 shadow-sm' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-300'
                                 }`}>
-                                  {def.descricao}
-                                </p>
-                                <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase mt-0.5 block tracking-wider">{def.categoria}</span>
+                                  {def.status === 'RESOLVIDO' ? <Check size={14}/> : idx + 1}
+                                </div>
+                                <div>
+                                  <p className={`text-xs font-bold transition-colors ${
+                                    def.status === 'RESOLVIDO' ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-700 dark:text-slate-200'
+                                  }`}>
+                                    {def.descricao}
+                                  </p>
+                                  <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase mt-0.5 block tracking-wider">{def.categoria}</span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {fotoDef && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedImagePreview({ url: fotoDef, label: `Foto do Defeito: ${def.categoria || def.descricao}` });
+                                    }}
+                                    className="px-2.5 py-1 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 text-[10px] font-black hover:scale-105 transition-transform flex items-center gap-1 cursor-pointer"
+                                    title="Visualizar Foto do Defeito"
+                                  >
+                                    <Camera size={12} className="text-emerald-600 dark:text-emerald-400"/>
+                                    <span className="hidden sm:inline">Foto</span>
+                                  </button>
+                                )}
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase ${
+                                  def.status === 'RESOLVIDO' ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                }`}>
+                                  {def.status === 'RESOLVIDO' ? 'Concluído' : 'Pendente'}
+                                </span>
                               </div>
                             </div>
-
-                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase ${
-                              def.status === 'RESOLVIDO' ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-                            }`}>
-                              {def.status === 'RESOLVIDO' ? 'Concluído' : 'Pendente'}
-                            </span>
-                          </div>
-                        ))}
+                          );
+                        })}
                         {(solicitarChamado.defeitos || []).length === 0 && (
                           <p className="text-xs font-medium text-slate-400 italic">Nenhum defeito reportado neste chamado.</p>
                         )}
@@ -1485,11 +1544,70 @@ export default function MecanicoView({
       {/* ── MODAL DE DETALHES E COMENTÁRIOS DO CHAMADO (Sempre em Primeiro Plano z-[80]) ── */}
       {detailChamado && (() => {
         const vec = getVehicle(detailChamado.placa);
-        const fotosArr = Object.entries(detailChamado.fotosChamado || {}).filter(([_, url]) => !!url);
         const defeitos = detailChamado.defeitos || [];
         const historico = detailChamado.historicoModificacoes || [];
         const totalDef = defeitos.length;
         const resolvedDef = defeitos.filter(d => d.status === 'RESOLVIDO').length;
+
+        // 1. Fotos Gerais do Chamado (fotosChamado, fotosGerais)
+        const fotosGeraisRaw = detailChamado.dadosWorkflow?.fotosChamado || detailChamado.fotosChamado || detailChamado.fotosGerais || detailChamado.dadosWorkflow?.fotosGerais || {};
+
+        let fotosGeraisList = [];
+        if (Array.isArray(fotosGeraisRaw)) {
+          fotosGeraisList = fotosGeraisRaw.filter(Boolean).map((url, idx) => ({ 
+            label: `Foto Geral #${idx + 1}`, 
+            url, 
+            tipo: 'geral' 
+          }));
+        } else if (typeof fotosGeraisRaw === 'object' && fotosGeraisRaw !== null) {
+          const labelsMap = {
+            fotoVeiculo: 'Veículo (Fachada)',
+            fotoHodometro: 'Hodômetro (KM)',
+            fotoAdicional: 'Foto Adicional'
+          };
+          fotosGeraisList = Object.entries(fotosGeraisRaw)
+            .filter(([_, url]) => !!url)
+            .map(([k, url]) => ({ 
+              label: labelsMap[k] || k || 'Foto Geral', 
+              url, 
+              tipo: 'geral' 
+            }));
+        }
+
+        // 2. Fotos de cada Defeito Reportado
+        const fotosDefeitosList = [];
+        defeitos.forEach((d, idx) => {
+          const defTitulo = d.categoria ? `${d.categoria}` : (d.descricao ? (d.descricao.length > 25 ? d.descricao.slice(0, 25) + '...' : d.descricao) : `Defeito #${idx + 1}`);
+          if (d.fotoDefeito) {
+            fotosDefeitosList.push({ label: `Defeito: ${defTitulo}`, url: d.fotoDefeito, defeitoId: d.id, tipo: 'defeito' });
+          }
+          if (d.foto && d.foto !== d.fotoDefeito) {
+            fotosDefeitosList.push({ label: `Defeito: ${defTitulo}`, url: d.foto, defeitoId: d.id, tipo: 'defeito' });
+          }
+          if (d.fotoUrl && d.fotoUrl !== d.fotoDefeito && d.fotoUrl !== d.foto) {
+            fotosDefeitosList.push({ label: `Defeito: ${defTitulo}`, url: d.fotoUrl, defeitoId: d.id, tipo: 'defeito' });
+          }
+          if (Array.isArray(d.fotos)) {
+            d.fotos.filter(Boolean).forEach((f, fIdx) => {
+              fotosDefeitosList.push({ label: `Defeito ${defTitulo} (${fIdx + 1})`, url: f, defeitoId: d.id, tipo: 'defeito' });
+            });
+          }
+        });
+
+        // 3. Fotos de Reparo do Mecânico (se houver)
+        const fotosReparoRaw = detailChamado.fotosReparo || detailChamado.dadosWorkflow?.fotosReparo || [];
+        const fotosReparoList = (Array.isArray(fotosReparoRaw) ? fotosReparoRaw : [])
+          .filter(Boolean)
+          .map((url, idx) => ({ label: `Foto do Reparo #${idx + 1}`, url, tipo: 'reparo' }));
+
+        // Unificar todas as fotos e remover duplicatas de URL
+        const mapUrls = new Map();
+        [...fotosGeraisList, ...fotosDefeitosList, ...fotosReparoList].forEach(item => {
+          if (item && item.url && !mapUrls.has(item.url)) {
+            mapUrls.set(item.url, item);
+          }
+        });
+        const todasEvidencias = Array.from(mapUrls.values());
 
         return (
           <div className="fixed inset-0 z-[80] flex justify-center items-end sm:items-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-300">
@@ -1574,19 +1692,37 @@ export default function MecanicoView({
                   </div>
                 </div>
 
-                {/* Fotos do Chamado */}
-                {fotosArr.length > 0 && (
+                {/* Evidências Fotográficas do Chamado (Fotos Gerais e dos Defeitos) */}
+                {todasEvidencias.length > 0 && (
                   <div className="space-y-3">
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                      <Eye size={16}/> Fotos do Chamado ({fotosArr.length})
-                    </h4>
-                    <div className="grid grid-cols-2 gap-3">
-                      {fotosArr.map(([key, url]) => (
-                        <div key={key} className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm group">
-                          <img src={url} alt={key} className="w-full h-32 object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer" onClick={() => setSelectedImagePreview({ url, label: key === 'fotoVeiculo' ? 'Veículo' : key === 'fotoHodometro' ? 'Hodômetro' : key === 'fotoAdicional' ? 'Adicional' : key })} />
-                          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                            <p className="text-[9px] font-black text-white uppercase tracking-wider">
-                              {key === 'fotoVeiculo' ? 'Veículo' : key === 'fotoHodometro' ? 'Hodômetro' : key === 'fotoAdicional' ? 'Adicional' : key}
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <Camera size={16} className="text-emerald-500"/> Evidências Fotográficas ({todasEvidencias.length})
+                      </h4>
+                      <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800/60">
+                        Toque para ampliar
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {todasEvidencias.map((item, idx) => (
+                        <div 
+                          key={idx} 
+                          onClick={() => setSelectedImagePreview({ url: item.url, label: item.label })}
+                          className="relative aspect-square rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm group cursor-pointer bg-slate-900"
+                        >
+                          <img 
+                            src={item.url} 
+                            alt={item.label} 
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-90 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
+                            <div className="flex justify-end">
+                              <div className="p-1 bg-black/40 backdrop-blur-xs rounded-lg text-white/90">
+                                <ZoomIn size={12}/>
+                              </div>
+                            </div>
+                            <p className="text-[9px] font-black text-white uppercase tracking-wider line-clamp-1">
+                              {item.label}
                             </p>
                           </div>
                         </div>
@@ -1602,26 +1738,59 @@ export default function MecanicoView({
                   </h4>
                   {totalDef > 0 ? (
                     <div className="space-y-3">
-                      {defeitos.map((d, i) => (
-                        <div key={d.id || i} className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] space-y-2.5">
-                          <div className="flex justify-between items-start">
-                            <p className="text-sm font-bold text-slate-800 dark:text-slate-200 flex-1">{d.descricao || 'Sem descrição'}</p>
-                            <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider shrink-0 ml-2 ${d.status === 'RESOLVIDO' ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'}`}>
-                              {d.status || 'Pendente'}
-                            </span>
-                          </div>
-                          <div className="flex gap-2 flex-wrap">
-                            {d.categoria && (
-                              <span className="text-[10px] font-black bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg shadow-xs text-slate-500 dark:text-slate-300 uppercase tracking-wider">{d.categoria}</span>
-                            )}
-                            {d.dataResolucao && (
-                              <span className="text-[10px] font-black bg-emerald-50 text-emerald-600 px-2.5 py-1 rounded-lg border border-emerald-200">
-                                Resolvido em: {new Date(d.dataResolucao).toLocaleDateString('pt-BR')}
+                      {defeitos.map((d, i) => {
+                        const fotoDef = d.fotoDefeito || d.foto || d.fotoUrl || (Array.isArray(d.fotos) && d.fotos[0]);
+                        return (
+                          <div key={d.id || i} className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] space-y-3">
+                            <div className="flex justify-between items-start">
+                              <p className="text-sm font-bold text-slate-800 dark:text-slate-200 flex-1">{d.descricao || 'Sem descrição'}</p>
+                              <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider shrink-0 ml-2 ${d.status === 'RESOLVIDO' ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'}`}>
+                                {d.status || 'Pendente'}
                               </span>
+                            </div>
+
+                            {/* Foto específica deste defeito se houver */}
+                            {fotoDef && (
+                              <div 
+                                onClick={() => setSelectedImagePreview({ url: fotoDef, label: `Foto do Defeito: ${d.categoria || d.descricao || '#' + (i + 1)}` })}
+                                className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-900 group cursor-pointer aspect-video max-h-36 flex items-center justify-center shadow-xs"
+                              >
+                                <img src={fotoDef} alt="Foto do defeito" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end justify-between p-2.5 opacity-90 group-hover:opacity-100 transition-opacity">
+                                  <span className="text-[9px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                                    <Camera size={12} className="text-emerald-400"/> Foto do Defeito
+                                  </span>
+                                  <span className="text-[9px] font-bold text-white/90 bg-white/20 backdrop-blur-xs px-2 py-0.5 rounded-lg flex items-center gap-1">
+                                    <ZoomIn size={11}/> Ampliar
+                                  </span>
+                                </div>
+                              </div>
                             )}
+
+                            <div className="flex gap-2 flex-wrap items-center justify-between">
+                              <div className="flex gap-2 flex-wrap">
+                                {d.categoria && (
+                                  <span className="text-[10px] font-black bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg shadow-xs text-slate-500 dark:text-slate-300 uppercase tracking-wider">{d.categoria}</span>
+                                )}
+                                {d.dataResolucao && (
+                                  <span className="text-[10px] font-black bg-emerald-50 text-emerald-600 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                    Resolvido em: {new Date(d.dataResolucao).toLocaleDateString('pt-BR')}
+                                  </span>
+                                )}
+                              </div>
+                              {fotoDef && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedImagePreview({ url: fotoDef, label: `Foto do Defeito: ${d.categoria || d.descricao || '#' + (i + 1)}` })}
+                                  className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye size={12}/> Ver Foto
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-xs text-slate-400 italic">Nenhum defeito reportado.</p>
