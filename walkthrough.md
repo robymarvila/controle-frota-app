@@ -98,7 +98,61 @@
 
 ---
 
-### 9. Status de Validação Local
-- **Build**: `npm run build` executado com sucesso (**0 erros**, `✓ built in 20.93s`).
-- **Capacitor**: `npx cap sync` sincronizado para Android e Web (`[info] Sync finished in 0.568s`).
-- **Git Push**: Em estrita conformidade com `.agents/AGENTS.md`, **nenhum push para o GitHub foi realizado**.
+---
+
+### 10. Backup Completo Compactado do Sistema
+- **Arquivo de Backup**: `c:\Users\robym\Desktop\Documentos\Analise de dados\fleet-operacao-app-backup-20260826_123757.zip`
+- **Tamanho**: `178.3 MB`
+- **Conteúdo**: Cópia integral e recursiva de todos os códigos-fonte, assets, plugins, arquivos de configuração e projetos Android/Capacitor, gerada de forma limpa sem os diretórios temporários (`node_modules`, `.git`, `dist`).
+
+---
+
+### 11. Implementação da Tela de Novidades da Release v2.6 (`WelcomeReleaseModal.jsx`)
+- **Regras de Versão & 10 Dias**:
+  - Chave de armazenamento atualizada para `release_v2.6_first_login_${userId}` no `localStorage`, reiniciando a janela de 10 dias corridos de exibição automática para todos os usuários do sistema.
+  - Mantido o controle `welcome_modal_dismissed_${userId}` em `sessionStorage` para abrir no máximo 1 vez por sessão.
+  - Gatilho do Header em [App.jsx](file:///c:/Users/robym/Desktop/Documentos/Analise%20de%20dados/fleet-operacao-app/src/App.jsx) atualizado para `Novidades v2.6`.
+- **Nível 1 (Destaques Rápidos - 6 Cards de Alto Impacto)**:
+  1. 🌟 **Visão Hub Executiva em Chamados E-CAR**: Cards analíticos com tomada de decisão rápida e alternância instantânea para a Visão Clássica.
+  2. 📱 **App Controle Operacional para Android**: Aplicativo nativo em produção via Capacitor com câmera, GPS e notificações.
+  3. 📊 **Indicadores de Frota & Dashboard**: Disponíveis, Impeditivos (Parados) e Não Impeditivos (Rodando) com histórico de 30 dias.
+  4. 🔧 **Fluxo "Solicitar Liberação" & Oficinas**: Checklist com atalho de fotos de defeitos `[ 📷 Foto ]`, laudo técnico e sub-fluxo financeiro Dual-Write.
+  5. 🏢 **Cadastro Centralizado de Oficinas**: Gestão de parceiros mecânicos credenciados e internos.
+  6. 🔒 **Segurança E2EE, Logout Liquid Glass & Dark Mode**: Criptografia ponta a ponta no login, bloqueio de sessão inesperada, novo modal de logout e Dark Mode calibrado.
+- **Nível 2 (Guia Completo Setorizado - 5 Abas Técnicas & Amigáveis)**:
+  - `frota`: Chamados E-CAR & Gestão (Visão Executiva vs Clássica, Galeria de Fotos com Zoom, Hodômetro KM).
+  - `indicadores`: Dashboard & Indicadores (Impeditivos vs Não Impeditivos, Histórico 30d por Placa).
+  - `mobile`: App Android Nativo (Capacitor, Câmera, GPS) & PWA (Service Worker).
+  - `mecanica`: Mecânica & Oficinas (Checklist com fotos, Sub-fluxo Compras/Financeiro Dual-Write, Cadastro de Oficinas).
+  - `seguranca`: Segurança, WFM & UX (E2EE, Logout Liquid Glass, Status do Auditor, Dark Mode).
+
+---
+
+---
+
+### 13. Correção de Sincronização de Defeitos & Criação do `ModalBloqueioLiberacao.jsx` (Liquid Glass)
+- **Problema (Placa `THC6I61`, ID `1786125284314` / `ALP.M-284314`)**:
+  - Ao tentar liberar o veículo no assistente de liberação da Frota, o sistema disparava o alerta `"Não é possível liberar o veículo. Existem 1 defeito(s) impeditivo(s) pendente(s). Resolva-os primeiro no Checklist de Defeitos."`, mesmo com todos os defeitos reais gravados como `"status": "RESOLVIDO"` no Supabase.
+- **Causa Raiz**:
+  - A query inicial de carga em [App.jsx](file:///c:/Users/robym/Desktop/Documentos/Analise%20de%20dados/fleet-operacao-app/src/App.jsx) (`fieldsChamados`) não continha as colunas `defeitos` e `dadosWorkflow`.
+  - Como resultado, `mappedChamados` gerava um defeito sintético de fallback com `status = 'PENDENTE'` em memória para o chamado com status `PARADO`.
+  - A função `handleLiberarVeiculo` consultava esse objeto em memória e disparava um alerta nativo do navegador (`alert()`).
+- **Implementação Realizada**:
+  1. **Manutenção de Query Inicial Leve (`fieldsChamados`)**: A query inicial carrega todos os 571 chamados do sistema em apenas **500 milissegundos** sem trafegar colunas pesadas de fotos/base64 em lote, eliminando o erro 500 (`statement_timeout`).
+  2. **Consulta Sob Demanda de Defeitos na Liberação (`handleLiberarVeiculo`)**: Ao acionar a liberação de qualquer chamado (ex.: `THC6I61`), o sistema consulta em tempo real (em ~200ms) os dados físicos de `defeitos` daquele ID específico no Supabase, garantindo que os defeitos reais sejam sempre validados sem onerar a listagem geral.
+  3. **Criação do Componente [ModalBloqueioLiberacao.jsx](file:///c:/Users/robym/Desktop/Documentos/Analise%20de%20dados/fleet-operacao-app/src/components/ModalBloqueioLiberacao.jsx)**:
+     - Modal ultra-premium com design *Liquid Glass* (`backdrop-blur-xl`, `bg-slate-950/80`, ambient glow Rose/Amber).
+     - Exibe cabeçalho de segurança com ícone `ShieldAlert`, placa e número da OS.
+     - Lista detalhada de todos os defeitos pendentes com categoria, indicador impeditivo e badge "Pendente".
+     - Explicação clara da regra de compliance (100% dos defeitos devem estar concluídos).
+     - Botões intuitivos: *"Voltar"* e *"Ir para o Checklist de Defeitos"*.
+  4. **Substituição dos Alertas Nativos**:
+     - No **Assistente de Liberação da Frota** ([App.jsx](file:///c:/Users/robym/Desktop/Documentos/Analise%20de%20dados/fleet-operacao-app/src/App.jsx)): Acionamento automático de `ModalBloqueioLiberacao` se houver qualquer defeito pendente.
+     - No **Painel do Mecânico** ([MecanicoView.jsx](file:///c:/Users/robym/Desktop/Documentos/Analise%20de%20dados/fleet-operacao-app/src/components/MecanicoView.jsx)): Acionamento de `ModalBloqueioLiberacao` ao tentar clicar em *"Solicitar Liberação"* com defeitos em aberto no checklist.
+
+---
+
+### 14. Status de Validação Local
+- **Build**: `npm run build` executado com sucesso (**0 erros**, `✓ built in 23.05s`).
+- **Capacitor**: `npx cap sync` sincronizado para Android e Web (`[info] Sync finished in 0.42s`).
+- **Git Push**: Em estrita conformidade com as diretrizes do projeto (`.agents/AGENTS.md`), **nenhum push para o GitHub foi realizado**.

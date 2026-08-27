@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import ModalConfirmacaoLogout from './ModalConfirmacaoLogout';
+import ModalBloqueioLiberacao from './ModalBloqueioLiberacao';
 import { 
   Search, Wrench, Home, Truck, CheckCircle2, ClipboardCheck, 
   AlertCircle, X, ChevronRight, PlayCircle, Eye, ShieldAlert,
@@ -102,6 +103,7 @@ export default function MecanicoView({
   const [fotosReparo, setFotosReparo] = useState([null, null, null]);
   const [showDetalhesInModal, setShowDetalhesInModal] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [bloqueioModalData, setBloqueioModalData] = useState(null);
 
   // User Profile State
   const [showSenha, setShowSenha] = useState(false);
@@ -516,7 +518,13 @@ export default function MecanicoView({
     if (!solicitarChamado) return;
     const unresolved = (solicitarChamado.defeitos || []).filter(d => d.status !== 'RESOLVIDO');
     if (unresolved.length > 0) {
-      return alert('Não é possível solicitar a liberação enquanto houver defeitos não marcados como resolvidos no checklist.');
+      setBloqueioModalData({
+        isOpen: true,
+        chamado: solicitarChamado,
+        defeitosPendentes: unresolved,
+        origem: 'mecanico'
+      });
+      return;
     }
     if (!relatorioTecnico.trim()) {
       return alert('Por favor, descreva no relatório técnico o que foi realizado/reparado no veículo.');
@@ -1891,6 +1899,21 @@ export default function MecanicoView({
         onConfirm={handleConfirmSystemLogout}
         currentUser={currentUser}
       />
+
+      {/* ── MODAL ULTRA-PREMIUM DE BLOQUEIO DE LIBERAÇÃO ── */}
+      {bloqueioModalData && (
+        <ModalBloqueioLiberacao
+          isOpen={!!bloqueioModalData}
+          onClose={() => setBloqueioModalData(null)}
+          chamado={bloqueioModalData.chamado}
+          defeitosPendentes={bloqueioModalData.defeitosPendentes}
+          origem={bloqueioModalData.origem || 'mecanico'}
+          onIrParaChecklist={() => {
+            setBloqueioModalData(null);
+            setShowDetalhesInModal(false);
+          }}
+        />
+      )}
 
     </div>
   );

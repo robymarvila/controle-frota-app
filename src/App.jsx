@@ -26,6 +26,7 @@ import { ComposedChart, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as R
 import WelcomeReleaseModal, { checkShouldAutoShowReleaseModal } from './components/WelcomeReleaseModal';
 import ModalConfirmacaoAbertura from './components/ModalConfirmacaoAbertura';
 import ModalConfirmacaoLogout from './components/ModalConfirmacaoLogout';
+import ModalBloqueioLiberacao from './components/ModalBloqueioLiberacao';
 
 import * as XLSX from 'xlsx';
 
@@ -1390,6 +1391,15 @@ export default function App() {
           if (typeof defs === 'string') {
             try { defs = JSON.parse(defs); } catch(e) {}
           }
+          if (!Array.isArray(defs) || defs.length === 0) {
+            let wfDefs = c.dadosWorkflow?.defeitos || c.dados_workflow?.defeitos;
+            if (typeof wfDefs === 'string') {
+              try { wfDefs = JSON.parse(wfDefs); } catch(e) {}
+            }
+            if (Array.isArray(wfDefs) && wfDefs.length > 0) {
+              defs = wfDefs;
+            }
+          }
           if ((!Array.isArray(defs) || defs.length === 0) && (c.defeitoEncontrado || c.defeitoPrincipal)) {
             defs = [{
               id: c.id || Date.now(),
@@ -1853,6 +1863,8 @@ export default function App() {
   const [chamadoEmEdicao, setChamadoEmEdicao] = useState(null);
 
   const [chamadoParaLiberar, setChamadoParaLiberar] = useState(null);
+
+  const [bloqueioLiberacaoData, setBloqueioLiberacaoData] = useState(null);
 
   const [chamadoRecemCriado, setChamadoRecemCriado] = useState(null);
 
@@ -2791,7 +2803,7 @@ export default function App() {
     }
   };
 
-  const handleLiberarVeiculo = (dadosLiberacao) => {
+  const handleLiberarVeiculo = async (dadosLiberacao) => {
     const { tipoAcao, motivoRecusa, chamadoId, dataLiberacao, horaLiberacao, temPendencia, pendencia, defeitoPrincipal, isImpeditivo, numeroNovoChamado } = dadosLiberacao;
     const chamadoOriginal = (rawChamados || []).find(c => c.id === chamadoId) || chamados.find(c => c.id === chamadoId);
 
@@ -2811,13 +2823,48 @@ export default function App() {
     const dtObj = new Date(`${dataLiberacao}T${horaLiberacao}`);
     const dataHoraFechamento = !isNaN(dtObj.getTime()) ? dtObj.toISOString() : `${dataLiberacao}T${horaLiberacao}`;
 
-    // ★ SMART CLOSING: Validar defeitos impeditivos pendentes
-    if (chamadoOriginal?.defeitos && chamadoOriginal.defeitos.length > 0) {
-      const impeditivosPendentes = chamadoOriginal.defeitos.filter(d => d.isImpeditivo && d.status === 'PENDENTE');
-      if (impeditivosPendentes.length > 0) {
-        alert(`Não é possível liberar o veículo. Existem ${impeditivosPendentes.length} defeito(s) impeditivo(s) pendente(s). Resolva-os primeiro no Checklist de Defeitos.`);
-        return;
+    // ★ SMART CLOSING: Consulta sob demanda dos defeitos reais gravados no Supabase
+    let defsToCheck = [];
+    try {
+      const { data: dbTicket } = await supabase.from('chamados').select('id,defeitos,dadosWorkflow').eq('id', chamadoId).maybeSingle();
+      if (dbTicket) {
+        let parsed = dbTicket.defeitos;
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch(e) {}
+        }
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          defsToCheck = parsed;
+        } else {
+          let wfDefs = dbTicket.dadosWorkflow?.defeitos;
+          if (typeof wfDefs === 'string') {
+            try { wfDefs = JSON.parse(wfDefs); } catch(e) {}
+          }
+          if (Array.isArray(wfDefs) && wfDefs.length > 0) {
+            defsToCheck = wfDefs;
+          }
+        }
       }
+    } catch (err) {
+      console.warn('Erro ao consultar defeitos atualizados para liberação:', err);
+    }
+
+    if (defsToCheck.length === 0) {
+      let memDefs = chamadoOriginal?.defeitos;
+      if (typeof memDefs === 'string') {
+        try { memDefs = JSON.parse(memDefs); } catch(e) {}
+      }
+      if (Array.isArray(memDefs)) defsToCheck = memDefs;
+    }
+
+    const defeitosPendentes = (defsToCheck || []).filter(d => d.status !== 'RESOLVIDO');
+    if (defeitosPendentes.length > 0) {
+      setBloqueioLiberacaoData({
+        isOpen: true,
+        chamado: { ...chamadoOriginal, defeitos: defsToCheck },
+        defeitosPendentes,
+        origem: 'frota'
+      });
+      return;
     }
 
     if (temPendencia === 'SIM' && isImpeditivo === 'SIM') {
@@ -3209,6 +3256,19 @@ export default function App() {
           onConfirm={handleLogout}
           currentUser={currentUser}
         />
+        {bloqueioLiberacaoData && (
+          <ModalBloqueioLiberacao
+            isOpen={!!bloqueioLiberacaoData}
+            onClose={() => setBloqueioLiberacaoData(null)}
+            chamado={bloqueioLiberacaoData.chamado}
+            defeitosPendentes={bloqueioLiberacaoData.defeitosPendentes}
+            origem={bloqueioLiberacaoData.origem || 'frota'}
+            onIrParaChecklist={(c) => {
+              setBloqueioLiberacaoData(null);
+              setChamadoEmEdicao(c);
+            }}
+          />
+        )}
         <CustomFeedbackModal {...feedbackModal} />
       </div>
     );
@@ -3395,14 +3455,14 @@ export default function App() {
 
             </button>
 
-            {/* Novidades v2.5 Release Modal Trigger */}
+            {/* Novidades v2.6 Release Modal Trigger */}
             <button 
               onClick={() => setIsWelcomeModalOpen(true)} 
-              className="px-3.5 py-2.5 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 hover:from-emerald-500/20 hover:to-indigo-500/20 text-emerald-700 dark:text-emerald-300 rounded-full transition-all border border-emerald-500/30 flex items-center gap-1.5 text-xs font-black shadow-sm active:scale-95 shrink-0"
+              className="px-3.5 py-2.5 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 hover:from-emerald-500/20 hover:to-indigo-500/20 text-emerald-700 dark:text-emerald-300 rounded-full transition-all border border-emerald-500/30 flex items-center gap-1.5 text-xs font-black shadow-sm active:scale-95 shrink-0 cursor-pointer"
               title="Ver novidades e guia da versão"
             >
               <Sparkles size={16} className="text-emerald-500 animate-pulse" />
-              <span className="hidden sm:inline">Novidades v2.5</span>
+              <span className="hidden sm:inline">Novidades v2.6</span>
             </button>
 
 
@@ -3554,6 +3614,20 @@ export default function App() {
         onConfirm={handleLogout}
         currentUser={currentUser}
       />
+
+      {bloqueioLiberacaoData && (
+        <ModalBloqueioLiberacao
+          isOpen={!!bloqueioLiberacaoData}
+          onClose={() => setBloqueioLiberacaoData(null)}
+          chamado={bloqueioLiberacaoData.chamado}
+          defeitosPendentes={bloqueioLiberacaoData.defeitosPendentes}
+          origem={bloqueioLiberacaoData.origem || 'frota'}
+          onIrParaChecklist={(c) => {
+            setBloqueioLiberacaoData(null);
+            setChamadoEmEdicao(c);
+          }}
+        />
+      )}
 
       <CustomFeedbackModal {...feedbackModal} />
 
