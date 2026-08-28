@@ -155,4 +155,21 @@
 ### 14. Status de Validação Local
 - **Build**: `npm run build` executado com sucesso (**0 erros**, `✓ built in 23.05s`).
 - **Capacitor**: `npx cap sync` sincronizado para Android e Web (`[info] Sync finished in 0.42s`).
-- **Git Push**: Em estrita conformidade com as diretrizes do projeto (`.agents/AGENTS.md`), **nenhum push para o GitHub foi realizado**.
+
+---
+
+### 15. Filtro Dinâmico em Cascata & Cumulativo (Visão Executiva de Chamados)
+- **Arquivo Modificado**: [ChamadosView.jsx](file:///c:/Users/robym/Desktop/Documentos/Analise%20de%20dados/fleet-operacao-app/src/components/ChamadosView.jsx)
+- **Funcionalidades Implementadas**:
+  1. **Filtro em Cascata (Linha 1 ➔ Linha 2)**:
+     - Ao clicar em qualquer sub-tipo no Card de **Chamados Impeditivos** (ex.: *Cesto Aéreo* - 35 chamados) ou **Não Impeditivos**, os cards da Linha 2 (**Oficina Externa** e **Oficina Interna**) recalculam dinamicamente seus contadores e listas considerando **exclusivamente o subconjunto filtrado**.
+  2. **Filtro Cumulativo (Drill-Down Composto)**:
+     - O usuário pode refinar a busca selecionando uma oficina parceira (ex.: *DIBRACAM* no card de Oficina Externa) ou um estágio de suprimentos (ex.: *Em Compras* no card de Oficina Interna).
+     - O sistema combina os filtros acumulativamente: `[Impeditivo] + [Sub-Tipo: Cesto Aéreo] + [Oficina: DIBRACAM]`.
+  3. **Banner de Filtros Ativos com Tags Removíveis**:
+     - Cada critério selecionado gera uma tag visual colorida com botão `(✕)` para exclusão pontual.
+     - Botão geral `[ Limpar Todos ]` para reset instantâneo.
+  4. **Status de Validação**:
+     - `npm run build`: **0 erros** (`✓ built in 46.97s`).
+     - `npx cap sync`: **Sincronizado** (`Sync finished in 0.392s`).
+     - **Git Push**: **Nenhum push foi realizado**, aguardando aprovação explícita do usuário conforme `.agents/AGENTS.md`.

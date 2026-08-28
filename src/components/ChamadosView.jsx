@@ -57,24 +57,88 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [showChamadosFiltersModal, setShowChamadosFiltersModal] = useState(false);
 
-  // Card Interactive Filter State
-  const [cardFilter, setCardFilter] = useState({
-    type: 'ALL', // 'ALL' | 'IMPEDITIVO' | 'NAO_IMPEDITIVO' | 'OFICINA_EXTERNA' | 'OFICINA_INTERNA'
-    subTipo: '',  // 'Cesto Aéreo' | 'Munk' | 'Moto' | 'Fiorino' | 'Argo' | 'Outros'
-    oficina: '',  // Nome da oficina externa
-    subFluxo: ''  // 'DIRETA' | 'COMPRAS' | 'FINANCEIRO' | 'PAGO'
+  // Executive Hub Cascading Cumulative Filter State
+  const [executiveFilters, setExecutiveFilters] = useState({
+    criticidade: 'ALL',   // 'ALL' | 'IMPEDITIVO' | 'NAO_IMPEDITIVO'
+    subTipo: '',          // '' | 'Cesto Aéreo' | 'Munk' | 'Moto' | 'Fiorino' | 'Argo' | 'Outros'
+    tipoOficina: 'ALL',   // 'ALL' | 'EXTERNA' | 'INTERNA'
+    oficinaNome: '',      // '' | 'DIBRACAM' | etc.
+    subFluxo: ''          // '' | 'DIRETA' | 'COMPRAS' | 'FINANCEIRO' | 'PAGO'
   });
 
+  const isExecutiveFilterActive = 
+    executiveFilters.criticidade !== 'ALL' || 
+    executiveFilters.subTipo !== '' || 
+    executiveFilters.tipoOficina !== 'ALL' || 
+    executiveFilters.oficinaNome !== '' || 
+    executiveFilters.subFluxo !== '';
+
   const activeChamadosFiltersCount = Object.values(filters).filter(v => v !== '').length;
-  const isAnyFilterActive = cardFilter.type !== 'ALL' || activeChamadosFiltersCount > 0 || searchQuery.trim() !== '';
+  const isAnyFilterActive = isExecutiveFilterActive || activeChamadosFiltersCount > 0 || searchQuery.trim() !== '';
 
   const clearAllFilters = () => {
-    setCardFilter({ type: 'ALL', subTipo: '', oficina: '', subFluxo: '' });
+    setExecutiveFilters({ criticidade: 'ALL', subTipo: '', tipoOficina: 'ALL', oficinaNome: '', subFluxo: '' });
     setFilters({ turno: '', tipoOp: '', subTipo: '', etapa: '', subFluxo: '' });
     setSearchQuery('');
   };
 
   const clearChamadosModalFilters = () => setFilters({ turno: '', tipoOp: '', subTipo: '', etapa: '', subFluxo: '' });
+
+  const handleToggleCriticidade = (targetCrit) => {
+    setExecutiveFilters(prev => {
+      if (prev.criticidade === targetCrit) {
+        return { ...prev, criticidade: 'ALL', subTipo: '' };
+      }
+      return { ...prev, criticidade: targetCrit };
+    });
+  };
+
+  const handleToggleSubTipo = (sub, crit) => {
+    setExecutiveFilters(prev => {
+      if (prev.criticidade === crit && prev.subTipo === sub) {
+        return { ...prev, subTipo: '' };
+      }
+      return { ...prev, criticidade: crit, subTipo: sub };
+    });
+  };
+
+  const handleToggleTipoOficina = (targetTipo) => {
+    setExecutiveFilters(prev => {
+      if (prev.tipoOficina === targetTipo) {
+        return { ...prev, tipoOficina: 'ALL', oficinaNome: '', subFluxo: '' };
+      }
+      return { ...prev, tipoOficina: targetTipo, oficinaNome: '', subFluxo: '' };
+    });
+  };
+
+  const handleToggleOficina = (nome) => {
+    setExecutiveFilters(prev => {
+      if (prev.tipoOficina === 'EXTERNA' && prev.oficinaNome === nome) {
+        return { ...prev, oficinaNome: '' };
+      }
+      return { ...prev, tipoOficina: 'EXTERNA', oficinaNome: nome, subFluxo: '' };
+    });
+  };
+
+  const handleToggleSubFluxo = (fluxo) => {
+    setExecutiveFilters(prev => {
+      if (prev.tipoOficina === 'INTERNA' && prev.subFluxo === fluxo) {
+        return { ...prev, subFluxo: '' };
+      }
+      return { ...prev, tipoOficina: 'INTERNA', subFluxo: fluxo, oficinaNome: '' };
+    });
+  };
+
+  const handleRemoveExecutiveTag = (filterKey) => {
+    setExecutiveFilters(prev => {
+      if (filterKey === 'criticidade') return { ...prev, criticidade: 'ALL', subTipo: '' };
+      if (filterKey === 'subTipo') return { ...prev, subTipo: '' };
+      if (filterKey === 'tipoOficina') return { ...prev, tipoOficina: 'ALL', oficinaNome: '', subFluxo: '' };
+      if (filterKey === 'oficinaNome') return { ...prev, oficinaNome: '' };
+      if (filterKey === 'subFluxo') return { ...prev, subFluxo: '' };
+      return prev;
+    });
+  };
 
   // Normalização de Sub-Tipos solicitados
   const normalizeSubTipoCategory = (subTipoRaw) => {
@@ -92,6 +156,12 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
     return (chamados || []).filter(c => c.status === 'ABERTO');
   }, [chamados]);
 
+  // Helpers de classificação
+  const isChamadoImpeditivo = (c) => (c.situacaoVeiculo || 'RODANDO') === 'PARADO' && !c.naoImpeditivo;
+  const isChamadoNaoImpeditivo = (c) => (c.situacaoVeiculo || 'RODANDO') === 'RODANDO' || c.naoImpeditivo;
+  const isChamadoOficinaExterna = (c) => c.etapaWorkflow === 'Oficina Externa' || c.oficinaExterna === 'SIM' || (c.dadosWorkflow?.tipoOficina === 'Externa' && c.etapaWorkflow !== 'RESOLVIDO') || (c.tipo_oficina === 'Externa' && c.etapaWorkflow !== 'RESOLVIDO');
+  const isChamadoOficinaInterna = (c) => c.etapaWorkflow === 'Oficina Interna' || c.dadosWorkflow?.tipoOficina === 'Interna' || c.tipo_oficina === 'Interna';
+
   // Busca Instantânea para Dropdown Flutuante (Resultados Instantâneos)
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -106,13 +176,13 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
     }).slice(0, 8);
   }, [chamadosAbertos, searchQuery]);
 
-  // Agrupamentos e Contadores para Linha 1 (Criticidade & Sub-Tipos)
+  // 2. Base da Linha 1 (Criticidade & Sub-Tipos) - Base Geral
   const chamadosImpeditivosBase = useMemo(() => {
-    return chamadosAbertos.filter(c => (c.situacaoVeiculo || 'RODANDO') === 'PARADO' && !c.naoImpeditivo);
+    return chamadosAbertos.filter(isChamadoImpeditivo);
   }, [chamadosAbertos]);
 
   const chamadosNaoImpeditivosBase = useMemo(() => {
-    return chamadosAbertos.filter(c => (c.situacaoVeiculo || 'RODANDO') === 'RODANDO' || c.naoImpeditivo);
+    return chamadosAbertos.filter(isChamadoNaoImpeditivo);
   }, [chamadosAbertos]);
 
   const impeditivosSubTipos = useMemo(() => {
@@ -135,10 +205,24 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
     return counts;
   }, [chamadosNaoImpeditivosBase, vehiclesMap]);
 
-  // Agrupamentos e Contadores para Linha 2 (Oficinas & Suprimentos)
+  // ★ 3. BASE CASCATA PARA A LINHA 2 (Oficinas filtradas dinamicamente pela Linha 1)
+  const chamadosContextoLinha2 = useMemo(() => {
+    return chamadosAbertos.filter(c => {
+      const v = vehiclesMap.get(c.placa);
+      if (executiveFilters.criticidade === 'IMPEDITIVO' && !isChamadoImpeditivo(c)) return false;
+      if (executiveFilters.criticidade === 'NAO_IMPEDITIVO' && !isChamadoNaoImpeditivo(c)) return false;
+      if (executiveFilters.subTipo) {
+        const cat = normalizeSubTipoCategory(v?.subTipo || v?.tipo);
+        if (cat !== executiveFilters.subTipo) return false;
+      }
+      return true;
+    });
+  }, [chamadosAbertos, executiveFilters.criticidade, executiveFilters.subTipo, vehiclesMap]);
+
+  // Linha 2 recalculada com base no contexto dinâmico da Linha 1
   const chamadosOficinaExternaBase = useMemo(() => {
-    return chamadosAbertos.filter(c => c.etapaWorkflow === 'Oficina Externa' || c.oficinaExterna === 'SIM' || (c.dadosWorkflow?.tipoOficina === 'Externa' && c.etapaWorkflow !== 'RESOLVIDO'));
-  }, [chamadosAbertos]);
+    return chamadosContextoLinha2.filter(isChamadoOficinaExterna);
+  }, [chamadosContextoLinha2]);
 
   const oficinasExternasDistrib = useMemo(() => {
     const map = new Map();
@@ -150,8 +234,8 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
   }, [chamadosOficinaExternaBase]);
 
   const chamadosOficinaInternaBase = useMemo(() => {
-    return chamadosAbertos.filter(c => c.etapaWorkflow === 'Oficina Interna' || c.dadosWorkflow?.tipoOficina === 'Interna' || c.tipo_oficina === 'Interna');
-  }, [chamadosAbertos]);
+    return chamadosContextoLinha2.filter(isChamadoOficinaInterna);
+  }, [chamadosContextoLinha2]);
 
   const oficinaInternaSubFluxoDistrib = useMemo(() => {
     const counts = { DIRETA: 0, COMPRAS: 0, FINANCEIRO: 0, PAGO: 0 };
@@ -165,18 +249,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
     return counts;
   }, [chamadosOficinaInternaBase]);
 
-  // Toggle do Card Filter Interativo
-  const handleCardFilterToggle = (type, subTipo = '', oficina = '', subFluxo = '') => {
-    setCardFilter(prev => {
-      const isSame = prev.type === type && prev.subTipo === subTipo && prev.oficina === oficina && prev.subFluxo === subFluxo;
-      if (isSame) {
-        return { type: 'ALL', subTipo: '', oficina: '', subFluxo: '' };
-      }
-      return { type, subTipo, oficina, subFluxo };
-    });
-  };
-
-  // Filtragem Geral Aplicada
+  // ★ 4. FILTRAGEM GERAL CUMULATIVA APLICADA (Lista Final)
   const chamadosFiltrados = useMemo(() => {
     return chamadosAbertos.filter(c => {
       // 1. Busca por texto
@@ -201,41 +274,69 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
         if (currentSf !== filters.subFluxo) return false;
       }
 
-      // 3. Filtro Ativo do Card (Visão Executiva)
-      if (cardFilter.type === 'IMPEDITIVO') {
-        const isImp = (c.situacaoVeiculo || 'RODANDO') === 'PARADO' && !c.naoImpeditivo;
-        if (!isImp) return false;
-        if (cardFilter.subTipo) {
-          const cat = normalizeSubTipoCategory(veiculo?.subTipo || veiculo?.tipo);
-          if (cat !== cardFilter.subTipo) return false;
-        }
-      } else if (cardFilter.type === 'NAO_IMPEDITIVO') {
-        const isNaoImp = (c.situacaoVeiculo || 'RODANDO') === 'RODANDO' || c.naoImpeditivo;
-        if (!isNaoImp) return false;
-        if (cardFilter.subTipo) {
-          const cat = normalizeSubTipoCategory(veiculo?.subTipo || veiculo?.tipo);
-          if (cat !== cardFilter.subTipo) return false;
-        }
-      } else if (cardFilter.type === 'OFICINA_EXTERNA') {
-        const isExt = c.etapaWorkflow === 'Oficina Externa' || c.oficinaExterna === 'SIM' || (c.dadosWorkflow?.tipoOficina === 'Externa' && c.etapaWorkflow !== 'RESOLVIDO') || (c.tipo_oficina === 'Externa' && c.etapaWorkflow !== 'RESOLVIDO');
-        if (!isExt) return false;
-        if (cardFilter.oficina) {
-          const ofName = (c.oficinaDestino || c.dadosWorkflow?.oficinaDestino || 'Oficina Credenciada').trim();
-          if (ofName !== cardFilter.oficina) return false;
-        }
-      } else if (cardFilter.type === 'OFICINA_INTERNA') {
-        const isInt = c.etapaWorkflow === 'Oficina Interna' || c.dadosWorkflow?.tipoOficina === 'Interna' || c.tipo_oficina === 'Interna';
-        if (!isInt) return false;
-        if (cardFilter.subFluxo) {
-          const sf = c.dadosWorkflow?.subFluxoOficina?.status || c.sub_fluxo_status || 'DIRETA';
-          if (cardFilter.subFluxo === 'DIRETA' && (sf === 'COMPRAS' || sf === 'FINANCEIRO' || sf === 'PAGO')) return false;
-          if (cardFilter.subFluxo !== 'DIRETA' && sf !== cardFilter.subFluxo) return false;
-        }
+      // 3. Filtros Cumulativos da Visão Executiva (Linha 1 + Linha 2)
+      if (executiveFilters.criticidade === 'IMPEDITIVO' && !isChamadoImpeditivo(c)) return false;
+      if (executiveFilters.criticidade === 'NAO_IMPEDITIVO' && !isChamadoNaoImpeditivo(c)) return false;
+      
+      if (executiveFilters.subTipo) {
+        const cat = normalizeSubTipoCategory(veiculo?.subTipo || veiculo?.tipo);
+        if (cat !== executiveFilters.subTipo) return false;
+      }
+
+      if (executiveFilters.tipoOficina === 'EXTERNA' && !isChamadoOficinaExterna(c)) return false;
+      if (executiveFilters.tipoOficina === 'INTERNA' && !isChamadoOficinaInterna(c)) return false;
+
+      if (executiveFilters.oficinaNome) {
+        const ofName = (c.oficinaDestino || c.dadosWorkflow?.oficinaDestino || 'Oficina Credenciada').trim();
+        if (ofName !== executiveFilters.oficinaNome) return false;
+      }
+
+      if (executiveFilters.subFluxo) {
+        const sf = c.dadosWorkflow?.subFluxoOficina?.status || c.sub_fluxo_status || 'DIRETA';
+        if (executiveFilters.subFluxo === 'DIRETA' && (sf === 'COMPRAS' || sf === 'FINANCEIRO' || sf === 'PAGO')) return false;
+        if (executiveFilters.subFluxo !== 'DIRETA' && sf !== executiveFilters.subFluxo) return false;
       }
 
       return true;
     });
-  }, [chamadosAbertos, searchQuery, filters, cardFilter, vehiclesMap]);
+  }, [chamadosAbertos, searchQuery, filters, executiveFilters, vehiclesMap]);
+
+  // Active Filter Badges list for the Banner
+  const activeFilterTags = useMemo(() => {
+    const tags = [];
+    if (executiveFilters.criticidade === 'IMPEDITIVO') {
+      tags.push({ key: 'criticidade', label: 'Impeditivos (Parados)', color: 'bg-rose-50 text-rose-700 border-rose-200' });
+    } else if (executiveFilters.criticidade === 'NAO_IMPEDITIVO') {
+      tags.push({ key: 'criticidade', label: 'Não Impeditivos / Atenção', color: 'bg-amber-50 text-amber-800 border-amber-200' });
+    }
+
+    if (executiveFilters.subTipo) {
+      tags.push({ key: 'subTipo', label: `Sub-Tipo: ${executiveFilters.subTipo}`, color: 'bg-blue-50 text-blue-700 border-blue-200' });
+    }
+
+    if (executiveFilters.tipoOficina === 'EXTERNA' && !executiveFilters.oficinaNome) {
+      tags.push({ key: 'tipoOficina', label: 'Oficina Externa (Todas)', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' });
+    }
+
+    if (executiveFilters.oficinaNome) {
+      tags.push({ key: 'oficinaNome', label: `Oficina: ${executiveFilters.oficinaNome}`, color: 'bg-indigo-50 text-indigo-700 border-indigo-200' });
+    }
+
+    if (executiveFilters.tipoOficina === 'INTERNA' && !executiveFilters.subFluxo) {
+      tags.push({ key: 'tipoOficina', label: 'Oficina Interna (Todas)', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' });
+    }
+
+    if (executiveFilters.subFluxo) {
+      const sfMap = { DIRETA: 'Manut. Direta', COMPRAS: 'Em Compras', FINANCEIRO: 'Em Financeiro', PAGO: 'Pago / Peças' };
+      tags.push({ key: 'subFluxo', label: `Sub-Fluxo: ${sfMap[executiveFilters.subFluxo] || executiveFilters.subFluxo}`, color: 'bg-emerald-50 text-emerald-700 border-emerald-200' });
+    }
+
+    if (searchQuery.trim()) {
+      tags.push({ key: 'search', label: `Busca: "${searchQuery.trim()}"`, color: 'bg-slate-100 text-slate-700 border-slate-300' });
+    }
+
+    return tags;
+  }, [executiveFilters, searchQuery]);
 
   // Divisões para a Visão Clássica
   const chamadosNormais = useMemo(() => {
@@ -246,28 +347,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
     return chamadosFiltrados.filter(c => (c.situacaoVeiculo || 'RODANDO') === 'RODANDO' || c.naoImpeditivo);
   }, [chamadosFiltrados]);
 
-  // Texto descritivo do filtro ativo para o banner
-  const getActiveFilterDescription = () => {
-    if (cardFilter.type === 'ALL') return null;
-    let label = '';
-    if (cardFilter.type === 'IMPEDITIVO') {
-      label = 'Chamados Impeditivos (Veículo Parado)';
-      if (cardFilter.subTipo) label += ` ➔ Sub-Tipo: ${cardFilter.subTipo}`;
-    } else if (cardFilter.type === 'NAO_IMPEDITIVO') {
-      label = 'Não Impeditivos / Atenção (Veículo Rodando)';
-      if (cardFilter.subTipo) label += ` ➔ Sub-Tipo: ${cardFilter.subTipo}`;
-    } else if (cardFilter.type === 'OFICINA_EXTERNA') {
-      label = 'Oficina Externa';
-      if (cardFilter.oficina) label += ` ➔ ${cardFilter.oficina}`;
-    } else if (cardFilter.type === 'OFICINA_INTERNA') {
-      label = 'Oficina Interna';
-      if (cardFilter.subFluxo === 'DIRETA') label += ' ➔ Manutenção Direta (Sem Compras)';
-      else if (cardFilter.subFluxo === 'COMPRAS') label += ' ➔ Aguardando Compras';
-      else if (cardFilter.subFluxo === 'FINANCEIRO') label += ' ➔ Aguardando Financeiro';
-      else if (cardFilter.subFluxo === 'PAGO') label += ' ➔ Peças Pagas / Liberadas';
-    }
-    return label;
-  };
+
 
   // Helper de ícone por sub-tipo
   const getSubTipoIcon = (cat) => {
@@ -563,7 +643,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
     );
   };
 
-  const activeFilterLabel = getActiveFilterDescription();
+
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-28 md:pb-12 px-2 sm:px-4 select-text">
@@ -745,18 +825,22 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
             {/* 🔴 CARD 1: CHAMADOS IMPEDITIVOS */}
             <div 
               className={`bg-white/90 backdrop-blur-xl rounded-3xl border p-6 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_40px_rgba(244,63,94,0.06)] ${
-                cardFilter.type === 'IMPEDITIVO' && !cardFilter.subTipo
+                executiveFilters.criticidade === 'IMPEDITIVO'
                   ? 'border-rose-400 ring-2 ring-rose-200 bg-rose-50/30'
                   : 'border-slate-100 hover:border-rose-200'
               }`}
             >
               {/* Header do Card */}
               <div 
-                onClick={() => handleCardFilterToggle('IMPEDITIVO')}
+                onClick={() => handleToggleCriticidade('IMPEDITIVO')}
                 className="flex items-center justify-between cursor-pointer group pb-4 border-b border-slate-100 select-none"
               >
                 <div className="flex items-center gap-3.5">
-                  <div className="w-11 h-11 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform border border-rose-100">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform border ${
+                    executiveFilters.criticidade === 'IMPEDITIVO'
+                      ? 'bg-rose-600 text-white border-rose-600'
+                      : 'bg-rose-50 text-rose-600 border-rose-100'
+                  }`}>
                     <AlertTriangle size={20} />
                   </div>
                   <div>
@@ -769,8 +853,12 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="px-3.5 py-1.5 rounded-full bg-rose-100 text-rose-700 font-black text-xs flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block"></span>
+                  <span className={`px-3.5 py-1.5 rounded-full font-black text-xs flex items-center gap-1.5 transition-all ${
+                    executiveFilters.criticidade === 'IMPEDITIVO'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-rose-100 text-rose-700'
+                  }`}>
+                    <span className={`w-2 h-2 rounded-full inline-block ${executiveFilters.criticidade === 'IMPEDITIVO' ? 'bg-white animate-ping' : 'bg-rose-500 animate-ping'}`}></span>
                     {chamadosImpeditivosBase.length} Veículos
                   </span>
                 </div>
@@ -782,12 +870,12 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {['Cesto Aéreo', 'Munk', 'Moto', 'Fiorino', 'Argo', 'Outros'].map(sub => {
                     const count = impeditivosSubTipos[sub] || 0;
-                    const isSelected = cardFilter.type === 'IMPEDITIVO' && cardFilter.subTipo === sub;
+                    const isSelected = executiveFilters.criticidade === 'IMPEDITIVO' && executiveFilters.subTipo === sub;
                     return (
                       <button
                         key={sub}
-                        onClick={(e) => { e.stopPropagation(); handleCardFilterToggle('IMPEDITIVO', sub); }}
-                        className={`px-3 py-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border ${
+                        onClick={(e) => { e.stopPropagation(); handleToggleSubTipo(sub, 'IMPEDITIVO'); }}
+                        className={`px-3 py-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border cursor-pointer ${
                           isSelected
                             ? 'bg-rose-600 text-white border-rose-600 shadow-md shadow-rose-600/20 scale-[1.02]'
                             : 'bg-slate-50/80 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border-slate-200/70 hover:border-rose-200'
@@ -812,18 +900,22 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
             {/* 🟡 CARD 2: CHAMADOS NÃO IMPEDITIVOS (ATENÇÃO) */}
             <div 
               className={`bg-white/90 backdrop-blur-xl rounded-3xl border p-6 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_40px_rgba(245,158,11,0.06)] ${
-                cardFilter.type === 'NAO_IMPEDITIVO' && !cardFilter.subTipo
+                executiveFilters.criticidade === 'NAO_IMPEDITIVO'
                   ? 'border-amber-400 ring-2 ring-amber-200 bg-amber-50/30'
                   : 'border-slate-100 hover:border-amber-200'
               }`}
             >
               {/* Header do Card */}
               <div 
-                onClick={() => handleCardFilterToggle('NAO_IMPEDITIVO')}
+                onClick={() => handleToggleCriticidade('NAO_IMPEDITIVO')}
                 className="flex items-center justify-between cursor-pointer group pb-4 border-b border-slate-100 select-none"
               >
                 <div className="flex items-center gap-3.5">
-                  <div className="w-11 h-11 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform border border-amber-100">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform border ${
+                    executiveFilters.criticidade === 'NAO_IMPEDITIVO'
+                      ? 'bg-amber-500 text-white border-amber-500'
+                      : 'bg-amber-50 text-amber-600 border-amber-100'
+                  }`}>
                     <Eye size={20} />
                   </div>
                   <div>
@@ -836,7 +928,11 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="px-3.5 py-1.5 rounded-full bg-amber-100 text-amber-800 font-black text-xs">
+                  <span className={`px-3.5 py-1.5 rounded-full font-black text-xs transition-all ${
+                    executiveFilters.criticidade === 'NAO_IMPEDITIVO'
+                      ? 'bg-amber-500 text-white shadow-sm'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}>
                     {chamadosNaoImpeditivosBase.length} Veículos
                   </span>
                 </div>
@@ -848,12 +944,12 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {['Cesto Aéreo', 'Munk', 'Moto', 'Fiorino', 'Argo', 'Outros'].map(sub => {
                     const count = naoImpeditivosSubTipos[sub] || 0;
-                    const isSelected = cardFilter.type === 'NAO_IMPEDITIVO' && cardFilter.subTipo === sub;
+                    const isSelected = executiveFilters.criticidade === 'NAO_IMPEDITIVO' && executiveFilters.subTipo === sub;
                     return (
                       <button
                         key={sub}
-                        onClick={(e) => { e.stopPropagation(); handleCardFilterToggle('NAO_IMPEDITIVO', sub); }}
-                        className={`px-3 py-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border ${
+                        onClick={(e) => { e.stopPropagation(); handleToggleSubTipo(sub, 'NAO_IMPEDITIVO'); }}
+                        className={`px-3 py-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border cursor-pointer ${
                           isSelected
                             ? 'bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-500/20 scale-[1.02]'
                             : 'bg-slate-50/80 hover:bg-amber-50 text-slate-700 hover:text-amber-800 border-slate-200/70 hover:border-amber-200'
@@ -877,37 +973,52 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
           </div>
 
-          {/* LINHA 2: OFICINAS & CADEIA DE SUPRIMENTOS */}
+          {/* LINHA 2: OFICINAS & CADEIA DE SUPRIMENTOS (RECALCULADAS DINAMICAMENTE PELA LINHA 1) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
             {/* 🏭 CARD 3: OFICINA EXTERNA */}
             <div 
               className={`bg-white/90 backdrop-blur-xl rounded-3xl border p-6 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_40px_rgba(99,102,241,0.06)] ${
-                cardFilter.type === 'OFICINA_EXTERNA' && !cardFilter.oficina
+                executiveFilters.tipoOficina === 'EXTERNA'
                   ? 'border-indigo-400 ring-2 ring-indigo-200 bg-indigo-50/30'
                   : 'border-slate-100 hover:border-indigo-200'
               }`}
             >
               {/* Header do Card */}
               <div 
-                onClick={() => handleCardFilterToggle('OFICINA_EXTERNA')}
+                onClick={() => handleToggleTipoOficina('EXTERNA')}
                 className="flex items-center justify-between cursor-pointer group pb-4 border-b border-slate-100 select-none"
               >
                 <div className="flex items-center gap-3.5">
-                  <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform border border-indigo-100">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform border ${
+                    executiveFilters.tipoOficina === 'EXTERNA'
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-indigo-50 text-indigo-600 border-indigo-100'
+                  }`}>
                     <Truck size={20} />
                   </div>
                   <div>
-                    <h3 className="text-base font-black text-blue-950 group-hover:text-indigo-600 transition-colors">
-                      Oficina Externa
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-blue-950 group-hover:text-indigo-600 transition-colors">
+                        Oficina Externa
+                      </h3>
+                      {(executiveFilters.criticidade !== 'ALL' || executiveFilters.subTipo) && (
+                        <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 text-[9px] font-black uppercase tracking-wider border border-indigo-500/20">
+                          Filtrado
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs font-bold text-slate-400">
                       Veículos encaminhados a oficinas credenciadas
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="px-3.5 py-1.5 rounded-full bg-indigo-100 text-indigo-700 font-black text-xs">
+                  <span className={`px-3.5 py-1.5 rounded-full font-black text-xs transition-all ${
+                    executiveFilters.tipoOficina === 'EXTERNA'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-indigo-100 text-indigo-700'
+                  }`}>
                     {chamadosOficinaExternaBase.length} Veículos
                   </span>
                 </div>
@@ -915,18 +1026,25 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
               {/* Oficinas Credenciadas Chips */}
               <div className="pt-4 space-y-2">
-                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Distribuição por Oficina:</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Distribuição por Oficina:</span>
+                  {executiveFilters.subTipo && (
+                    <span className="text-[10px] font-bold text-indigo-600">
+                      Exibindo {executiveFilters.subTipo}
+                    </span>
+                  )}
+                </div>
                 {oficinasExternasDistrib.length > 0 ? (
                   <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
                     {oficinasExternasDistrib.map(of => {
-                      const isSelected = cardFilter.type === 'OFICINA_EXTERNA' && cardFilter.oficina === of.nome;
+                      const isSelected = executiveFilters.tipoOficina === 'EXTERNA' && executiveFilters.oficinaNome === of.nome;
                       return (
                         <button
                           key={of.nome}
-                          onClick={(e) => { e.stopPropagation(); handleCardFilterToggle('OFICINA_EXTERNA', '', of.nome); }}
-                          className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all border ${
+                          onClick={(e) => { e.stopPropagation(); handleToggleOficina(of.nome); }}
+                          className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all border cursor-pointer ${
                             isSelected
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20'
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20 scale-[1.02]'
                               : 'bg-slate-50/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-800 border-slate-200/70 hover:border-indigo-200'
                           }`}
                         >
@@ -943,7 +1061,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                   </div>
                 ) : (
                   <div className="py-4 text-center text-xs font-bold text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                    Nenhum veículo em oficina externa no momento.
+                    Nenhum veículo em oficina externa para o filtro selecionado.
                   </div>
                 )}
               </div>
@@ -952,31 +1070,46 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
             {/* 🏢 CARD 4: OFICINA INTERNA */}
             <div 
               className={`bg-white/90 backdrop-blur-xl rounded-3xl border p-6 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_40px_rgba(16,185,129,0.06)] ${
-                cardFilter.type === 'OFICINA_INTERNA' && !cardFilter.subFluxo
+                executiveFilters.tipoOficina === 'INTERNA'
                   ? 'border-emerald-400 ring-2 ring-emerald-200 bg-emerald-50/30'
                   : 'border-slate-100 hover:border-emerald-200'
               }`}
             >
               {/* Header do Card */}
               <div 
-                onClick={() => handleCardFilterToggle('OFICINA_INTERNA')}
+                onClick={() => handleToggleTipoOficina('INTERNA')}
                 className="flex items-center justify-between cursor-pointer group pb-4 border-b border-slate-100 select-none"
               >
                 <div className="flex items-center gap-3.5">
-                  <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform border border-emerald-100">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform border ${
+                    executiveFilters.tipoOficina === 'INTERNA'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                  }`}>
                     <Home size={20} />
                   </div>
                   <div>
-                    <h3 className="text-base font-black text-blue-950 group-hover:text-emerald-600 transition-colors">
-                      Oficina Interna
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-blue-950 group-hover:text-emerald-600 transition-colors">
+                        Oficina Interna
+                      </h3>
+                      {(executiveFilters.criticidade !== 'ALL' || executiveFilters.subTipo) && (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase tracking-wider border border-emerald-500/20">
+                          Filtrado
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs font-bold text-slate-400">
                       Manutenção própria & controle de peças
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="px-3.5 py-1.5 rounded-full bg-emerald-100 text-emerald-700 font-black text-xs">
+                  <span className={`px-3.5 py-1.5 rounded-full font-black text-xs transition-all ${
+                    executiveFilters.tipoOficina === 'INTERNA'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-emerald-100 text-emerald-700'
+                  }`}>
                     {chamadosOficinaInternaBase.length} Veículos
                   </span>
                 </div>
@@ -984,24 +1117,31 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
               {/* Sub-Fluxo de Compras/Financeiro Grid */}
               <div className="pt-4 space-y-2">
-                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Estágio do Sub-Fluxo de Peças:</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Estágio do Sub-Fluxo de Peças:</span>
+                  {executiveFilters.subTipo && (
+                    <span className="text-[10px] font-bold text-emerald-600">
+                      Exibindo {executiveFilters.subTipo}
+                    </span>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   
                   {/* Manutenção Direta */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleCardFilterToggle('OFICINA_INTERNA', '', '', 'DIRETA'); }}
-                    className={`p-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border ${
-                      cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'DIRETA'
+                    onClick={(e) => { e.stopPropagation(); handleToggleSubFluxo('DIRETA'); }}
+                    className={`p-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border cursor-pointer ${
+                      executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'DIRETA'
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-600/20'
                         : 'bg-slate-50/80 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border-slate-200/70 hover:border-emerald-200'
                     }`}
                   >
                     <span className="flex items-center gap-1.5 truncate">
-                      <Wrench size={13} className={cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'DIRETA' ? 'text-white' : 'text-emerald-600'} />
+                      <Wrench size={13} className={executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'DIRETA' ? 'text-white' : 'text-emerald-600'} />
                       <span className="truncate">Manut. Direta</span>
                     </span>
                     <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
-                      cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'DIRETA' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
+                      executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'DIRETA' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
                     }`}>
                       {oficinaInternaSubFluxoDistrib.DIRETA}
                     </span>
@@ -1009,19 +1149,19 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
                   {/* Aguardando Compras */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleCardFilterToggle('OFICINA_INTERNA', '', '', 'COMPRAS'); }}
-                    className={`p-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border ${
-                      cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'COMPRAS'
+                    onClick={(e) => { e.stopPropagation(); handleToggleSubFluxo('COMPRAS'); }}
+                    className={`p-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border cursor-pointer ${
+                      executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'COMPRAS'
                         ? 'bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-500/20'
                         : 'bg-slate-50/80 hover:bg-amber-50 text-slate-700 hover:text-amber-800 border-slate-200/70 hover:border-amber-200'
                     }`}
                   >
                     <span className="flex items-center gap-1.5 truncate">
-                      <Briefcase size={13} className={cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'COMPRAS' ? 'text-white' : 'text-amber-500'} />
+                      <Briefcase size={13} className={executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'COMPRAS' ? 'text-white' : 'text-amber-500'} />
                       <span className="truncate">Em Compras</span>
                     </span>
                     <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
-                      cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'COMPRAS' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
+                      executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'COMPRAS' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
                     }`}>
                       {oficinaInternaSubFluxoDistrib.COMPRAS}
                     </span>
@@ -1029,19 +1169,19 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
                   {/* Aguardando Financeiro */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleCardFilterToggle('OFICINA_INTERNA', '', '', 'FINANCEIRO'); }}
-                    className={`p-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border ${
-                      cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'FINANCEIRO'
+                    onClick={(e) => { e.stopPropagation(); handleToggleSubFluxo('FINANCEIRO'); }}
+                    className={`p-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border cursor-pointer ${
+                      executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'FINANCEIRO'
                         ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20'
                         : 'bg-slate-50/80 hover:bg-blue-50 text-slate-700 hover:text-blue-800 border-slate-200/70 hover:border-blue-200'
                     }`}
                   >
                     <span className="flex items-center gap-1.5 truncate">
-                      <DollarSign size={13} className={cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'FINANCEIRO' ? 'text-white' : 'text-blue-500'} />
+                      <DollarSign size={13} className={executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'FINANCEIRO' ? 'text-white' : 'text-blue-500'} />
                       <span className="truncate">Em Financeiro</span>
                     </span>
                     <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
-                      cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'FINANCEIRO' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-800'
+                      executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'FINANCEIRO' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-800'
                     }`}>
                       {oficinaInternaSubFluxoDistrib.FINANCEIRO}
                     </span>
@@ -1049,19 +1189,19 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
                   {/* Pago / Liberado */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleCardFilterToggle('OFICINA_INTERNA', '', '', 'PAGO'); }}
-                    className={`p-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border ${
-                      cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'PAGO'
+                    onClick={(e) => { e.stopPropagation(); handleToggleSubFluxo('PAGO'); }}
+                    className={`p-2.5 rounded-2xl text-xs font-black flex items-center justify-between gap-1.5 transition-all border cursor-pointer ${
+                      executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'PAGO'
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-600/20'
                         : 'bg-slate-50/80 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border-slate-200/70 hover:border-emerald-200'
                     }`}
                   >
                     <span className="flex items-center gap-1.5 truncate">
-                      <CheckCircle2 size={13} className={cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'PAGO' ? 'text-white' : 'text-emerald-600'} />
+                      <CheckCircle2 size={13} className={executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'PAGO' ? 'text-white' : 'text-emerald-600'} />
                       <span className="truncate">Pago / Peças</span>
                     </span>
                     <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
-                      cardFilter.type === 'OFICINA_INTERNA' && cardFilter.subFluxo === 'PAGO' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
+                      executiveFilters.tipoOficina === 'INTERNA' && executiveFilters.subFluxo === 'PAGO' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
                     }`}>
                       {oficinaInternaSubFluxoDistrib.PAGO}
                     </span>
@@ -1073,25 +1213,46 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
           </div>
 
-          {/* BANNER DE FILTRO ATIVO (SELECIONADO VIA CARD OU GERAL) */}
-          {activeFilterLabel && (
-            <div className="bg-emerald-50/90 backdrop-blur-md border border-emerald-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-in fade-in duration-200">
-              <div className="flex items-center gap-2.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="text-xs font-bold text-slate-500">Exibindo:</span>
-                <span className="text-xs font-black text-emerald-950 bg-white px-3 py-1 rounded-xl border border-emerald-200 shadow-xs">
-                  {activeFilterLabel}
+          {/* BANNER DE FILTROS ATIVOS CUMULATIVOS (COM TAGS REMOVÍVEIS INDIVIDUALMENTE) */}
+          {activeFilterTags.length > 0 && (
+            <div className="bg-slate-50/90 dark:bg-slate-900/90 backdrop-blur-md border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-in fade-in duration-200">
+              <div className="flex items-center gap-2 flex-wrap flex-1">
+                <span className="flex items-center gap-1.5 text-xs font-black text-slate-500 uppercase tracking-wider mr-1">
+                  <Filter size={14} className="text-emerald-600 animate-pulse" />
+                  Filtros Ativos:
                 </span>
-                <span className="text-xs font-bold text-emerald-800">
-                  ({chamadosFiltrados.length} {chamadosFiltrados.length === 1 ? 'veículo' : 'veículos'})
+                
+                {activeFilterTags.map(tag => (
+                  <span 
+                    key={tag.key + tag.label}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black border shadow-xs transition-all animate-in zoom-in-95 ${tag.color}`}
+                  >
+                    <span>{tag.label}</span>
+                    <button
+                      onClick={() => {
+                        if (tag.key === 'search') setSearchQuery('');
+                        else handleRemoveExecutiveTag(tag.key);
+                      }}
+                      className="w-4 h-4 rounded-full hover:bg-black/10 dark:hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer"
+                      title="Remover este filtro"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+
+                <span className="text-xs font-bold text-slate-500 ml-1">
+                  ({chamadosFiltrados.length} {chamadosFiltrados.length === 1 ? 'veículo correspondente' : 'veículos correspondentes'})
                 </span>
               </div>
+
               <button
                 onClick={clearAllFilters}
-                className="text-xs font-black text-emerald-700 hover:text-emerald-900 bg-white hover:bg-emerald-100/50 px-3.5 py-1.5 rounded-xl border border-emerald-200 transition-colors flex items-center gap-1 shadow-xs"
+                className="text-xs font-black text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-3.5 py-1.5 rounded-xl border border-rose-200 transition-colors flex items-center gap-1.5 shadow-xs shrink-0 cursor-pointer"
+                title="Limpar todos os filtros ativos"
               >
                 <X size={14} />
-                <span>Limpar Filtro</span>
+                <span>Limpar Todos</span>
               </button>
             </div>
           )}
@@ -1107,7 +1268,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                 {chamadosFiltrados.length} {chamadosFiltrados.length === 1 ? 'Chamado' : 'Chamados'}
               </span>
             </div>
-            {renderWorkflowCardList(chamadosFiltrados, cardFilter.type === 'NAO_IMPEDITIVO')}
+            {renderWorkflowCardList(chamadosFiltrados, executiveFilters.criticidade === 'NAO_IMPEDITIVO')}
           </div>
 
         </div>
