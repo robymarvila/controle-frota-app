@@ -54,6 +54,7 @@ import ModalTrocaSenhaObrigatoria from './components/ModalTrocaSenhaObrigatoria'
 import ModalDefinirSenhaProvisoria from './components/ModalDefinirSenhaProvisoria';
 import { normalizeKey, hashPassword, verifyPassword, validatePasswordStrength } from './utils/security';
 import { gpsService } from './services/gpsService';
+import { compressImageToDataUrl } from './utils/imageCompressor';
 
 // --- CONFIGURAÇÕES E DADOS INICIAIS ---
 
@@ -11271,12 +11272,17 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                             type="file"
                             accept="image/*"
                             className="hidden"
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const file = e.target.files[0];
                               if (file) {
-                                const reader = new FileReader();
-                                reader.onloadend = () => setNovoDefeitoFoto(reader.result);
-                                reader.readAsDataURL(file);
+                                try {
+                                  const compressed = await compressImageToDataUrl(file);
+                                  setNovoDefeitoFoto(compressed);
+                                } catch (err) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => setNovoDefeitoFoto(reader.result);
+                                  reader.readAsDataURL(file);
+                                }
                               }
                             }}
                           />
@@ -11896,14 +11902,19 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                             type="file"
                             accept="image/*"
                             className="hidden"
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const file = e.target.files[0];
                               if (file) {
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  updateDefeito(defeito.id, 'fotoDefeito', reader.result);
-                                };
-                                reader.readAsDataURL(file);
+                                try {
+                                  const compressed = await compressImageToDataUrl(file);
+                                  updateDefeito(defeito.id, 'fotoDefeito', compressed);
+                                } catch (err) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    updateDefeito(defeito.id, 'fotoDefeito', reader.result);
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
                               }
                             }}
                           />
@@ -12029,26 +12040,17 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                           <span className="text-[9px] font-bold text-slate-400">Anexar Foto</span>
 
                           <input
-
                             type="file"
-
                             accept="image/*"
-
                             className="hidden"
-
-                            onChange={(e) => {
-
+                            onChange={async (e) => {
                               const file = e.target.files[0];
-
                               if (file) {
-
-                                const reader = new FileReader();
-
-                                reader.onloadend = () => {
-
+                                try {
+                                  const compressed = await compressImageToDataUrl(file);
                                   const newFotos = {
                                     ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}),
-                                    [item.key]: reader.result
+                                    [item.key]: compressed
                                   };
                                   setFormData({
                                     ...formData,
@@ -12058,15 +12060,26 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                                       fotosChamado: newFotos
                                     }
                                   });
-
-                                };
-
-                                reader.readAsDataURL(file);
-
+                                } catch (err) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    const newFotos = {
+                                      ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}),
+                                      [item.key]: reader.result
+                                    };
+                                    setFormData({
+                                      ...formData,
+                                      fotosChamado: newFotos,
+                                      dadosWorkflow: {
+                                        ...(formData.dadosWorkflow || {}),
+                                        fotosChamado: newFotos
+                                      }
+                                    });
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
                               }
-
                             }}
-
                           />
 
                         </label>

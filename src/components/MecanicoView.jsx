@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import ModalConfirmacaoLogout from './ModalConfirmacaoLogout';
 import ModalBloqueioLiberacao from './ModalBloqueioLiberacao';
+import { compressImageToDataUrl } from '../utils/imageCompressor';
 import { 
   Search, Wrench, Home, Truck, CheckCircle2, ClipboardCheck, 
   AlertCircle, X, ChevronRight, PlayCircle, Eye, ShieldAlert,
@@ -497,15 +498,22 @@ export default function MecanicoView({
     onSubmit(updated);
   };
 
-  const handleUploadFotoReparo = (index, file) => {
+  const handleUploadFotoReparo = async (index, file) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
+    try {
+      const compressed = await compressImageToDataUrl(file);
       const novasFotos = [...fotosReparo];
-      novasFotos[index] = reader.result;
+      novasFotos[index] = compressed;
       setFotosReparo(novasFotos);
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const novasFotos = [...fotosReparo];
+        novasFotos[index] = reader.result;
+        setFotosReparo(novasFotos);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleRemoverFotoReparo = (index) => {
