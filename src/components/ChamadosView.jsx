@@ -130,6 +130,12 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
   };
 
   const handleRemoveExecutiveTag = (filterKey) => {
+    if (filterKey === 'adv_turno') return setFilters(f => ({ ...f, turno: '' }));
+    if (filterKey === 'adv_tipoOp') return setFilters(f => ({ ...f, tipoOp: '' }));
+    if (filterKey === 'adv_subTipo') return setFilters(f => ({ ...f, subTipo: '' }));
+    if (filterKey === 'adv_etapa') return setFilters(f => ({ ...f, etapa: '' }));
+    if (filterKey === 'adv_subFluxo') return setFilters(f => ({ ...f, subFluxo: '' }));
+
     setExecutiveFilters(prev => {
       if (filterKey === 'criticidade') return { ...prev, criticidade: 'ALL', subTipo: '' };
       if (filterKey === 'subTipo') return { ...prev, subTipo: '' };
@@ -176,14 +182,30 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
     }).slice(0, 8);
   }, [chamadosAbertos, searchQuery]);
 
-  // 2. Base da Linha 1 (Criticidade & Sub-Tipos) - Base Geral
+  // 1.5 Base de Chamados Abertos Filtrada pelos Filtros Avançados do Modal (Turno, Tipo OP, Sub Tipo, Etapa, Sub Fluxo)
+  const chamadosBaseAvancada = useMemo(() => {
+    return chamadosAbertos.filter(c => {
+      const veiculo = vehiclesMap.get(c.placa);
+      if (filters.turno && String(veiculo?.turno || '').toUpperCase() !== String(filters.turno).toUpperCase()) return false;
+      if (filters.tipoOp && String(veiculo?.tipoOp || '').toUpperCase() !== String(filters.tipoOp).toUpperCase()) return false;
+      if (filters.subTipo && String(veiculo?.subTipo || '').toUpperCase() !== String(filters.subTipo).toUpperCase()) return false;
+      if (filters.etapa && getEtapaWorkflow(c) !== filters.etapa) return false;
+      if (filters.subFluxo) {
+        const currentSf = c.dadosWorkflow?.subFluxoOficina?.status || c.sub_fluxo_status || 'DIRETA';
+        if (currentSf !== filters.subFluxo) return false;
+      }
+      return true;
+    });
+  }, [chamadosAbertos, filters, vehiclesMap]);
+
+  // 2. Base da Linha 1 (Criticidade & Sub-Tipos) - Base com Filtros Avançados
   const chamadosImpeditivosBase = useMemo(() => {
-    return chamadosAbertos.filter(isChamadoImpeditivo);
-  }, [chamadosAbertos]);
+    return chamadosBaseAvancada.filter(isChamadoImpeditivo);
+  }, [chamadosBaseAvancada]);
 
   const chamadosNaoImpeditivosBase = useMemo(() => {
-    return chamadosAbertos.filter(isChamadoNaoImpeditivo);
-  }, [chamadosAbertos]);
+    return chamadosBaseAvancada.filter(isChamadoNaoImpeditivo);
+  }, [chamadosBaseAvancada]);
 
   const impeditivosSubTipos = useMemo(() => {
     const counts = { 'Cesto Aéreo': 0, 'Munk': 0, 'Moto': 0, 'Fiorino': 0, 'Argo': 0, 'Outros': 0 };
@@ -205,9 +227,9 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
     return counts;
   }, [chamadosNaoImpeditivosBase, vehiclesMap]);
 
-  // ★ 3. BASE CASCATA PARA A LINHA 2 (Oficinas filtradas dinamicamente pela Linha 1)
+  // ★ 3. BASE CASCATA PARA A LINHA 2 (Oficinas filtradas dinamicamente pela Linha 1 + Filtros Avançados)
   const chamadosContextoLinha2 = useMemo(() => {
-    return chamadosAbertos.filter(c => {
+    return chamadosBaseAvancada.filter(c => {
       const v = vehiclesMap.get(c.placa);
       if (executiveFilters.criticidade === 'IMPEDITIVO' && !isChamadoImpeditivo(c)) return false;
       if (executiveFilters.criticidade === 'NAO_IMPEDITIVO' && !isChamadoNaoImpeditivo(c)) return false;
@@ -217,7 +239,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
       }
       return true;
     });
-  }, [chamadosAbertos, executiveFilters.criticidade, executiveFilters.subTipo, vehiclesMap]);
+  }, [chamadosBaseAvancada, executiveFilters.criticidade, executiveFilters.subTipo, vehiclesMap]);
 
   // Linha 2 recalculada com base no contexto dinâmico da Linha 1
   const chamadosOficinaExternaBase = useMemo(() => {
@@ -251,7 +273,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
   // ★ 4. FILTRAGEM GERAL CUMULATIVA APLICADA (Lista Final)
   const chamadosFiltrados = useMemo(() => {
-    return chamadosAbertos.filter(c => {
+    return chamadosBaseAvancada.filter(c => {
       // 1. Busca por texto
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
@@ -263,18 +285,8 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
         if (!matchPlaca && !matchNum && !matchCod && !matchDef && !matchMotorista) return false;
       }
 
-      // 2. Filtros do Modal Avançado
+      // 2. Filtros Cumulativos da Visão Executiva (Linha 1 + Linha 2)
       const veiculo = vehiclesMap.get(c.placa);
-      if (filters.turno && String(veiculo?.turno || '').toUpperCase() !== String(filters.turno).toUpperCase()) return false;
-      if (filters.tipoOp && String(veiculo?.tipoOp || '').toUpperCase() !== String(filters.tipoOp).toUpperCase()) return false;
-      if (filters.subTipo && String(veiculo?.subTipo || '').toUpperCase() !== String(filters.subTipo).toUpperCase()) return false;
-      if (filters.etapa && getEtapaWorkflow(c) !== filters.etapa) return false;
-      if (filters.subFluxo) {
-        const currentSf = c.dadosWorkflow?.subFluxoOficina?.status || c.sub_fluxo_status || 'DIRETA';
-        if (currentSf !== filters.subFluxo) return false;
-      }
-
-      // 3. Filtros Cumulativos da Visão Executiva (Linha 1 + Linha 2)
       if (executiveFilters.criticidade === 'IMPEDITIVO' && !isChamadoImpeditivo(c)) return false;
       if (executiveFilters.criticidade === 'NAO_IMPEDITIVO' && !isChamadoNaoImpeditivo(c)) return false;
       
@@ -299,11 +311,28 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
 
       return true;
     });
-  }, [chamadosAbertos, searchQuery, filters, executiveFilters, vehiclesMap]);
+  }, [chamadosBaseAvancada, searchQuery, executiveFilters, vehiclesMap]);
 
   // Active Filter Badges list for the Banner
   const activeFilterTags = useMemo(() => {
     const tags = [];
+    if (filters.turno) {
+      tags.push({ key: 'adv_turno', label: `Turno: ${filters.turno}`, color: 'bg-emerald-50 text-emerald-700 border-emerald-200', onRemove: () => setFilters(f => ({ ...f, turno: '' })) });
+    }
+    if (filters.tipoOp) {
+      tags.push({ key: 'adv_tipoOp', label: `Tipo OP: ${filters.tipoOp}`, color: 'bg-emerald-50 text-emerald-700 border-emerald-200', onRemove: () => setFilters(f => ({ ...f, tipoOp: '' })) });
+    }
+    if (filters.subTipo) {
+      tags.push({ key: 'adv_subTipo', label: `Sub-Tipo: ${filters.subTipo}`, color: 'bg-emerald-50 text-emerald-700 border-emerald-200', onRemove: () => setFilters(f => ({ ...f, subTipo: '' })) });
+    }
+    if (filters.etapa) {
+      tags.push({ key: 'adv_etapa', label: `Etapa: ${filters.etapa}`, color: 'bg-purple-50 text-purple-700 border-purple-200', onRemove: () => setFilters(f => ({ ...f, etapa: '' })) });
+    }
+    if (filters.subFluxo) {
+      const sfMap = { DIRETA: 'Manut. Direta', COMPRAS: 'Em Compras', FINANCEIRO: 'Em Financeiro', PAGO: 'Pago / Peças' };
+      tags.push({ key: 'adv_subFluxo', label: `Sub-Fluxo: ${sfMap[filters.subFluxo] || filters.subFluxo}`, color: 'bg-emerald-50 text-emerald-700 border-emerald-200', onRemove: () => setFilters(f => ({ ...f, subFluxo: '' })) });
+    }
+
     if (executiveFilters.criticidade === 'IMPEDITIVO') {
       tags.push({ key: 'criticidade', label: 'Impeditivos (Parados)', color: 'bg-rose-50 text-rose-700 border-rose-200' });
     } else if (executiveFilters.criticidade === 'NAO_IMPEDITIVO') {
@@ -336,7 +365,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
     }
 
     return tags;
-  }, [executiveFilters, searchQuery]);
+  }, [filters, executiveFilters, searchQuery]);
 
   // Divisões para a Visão Clássica
   const chamadosNormais = useMemo(() => {
@@ -844,9 +873,16 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                     <AlertTriangle size={20} />
                   </div>
                   <div>
-                    <h3 className="text-base font-black text-blue-950 group-hover:text-rose-600 transition-colors">
-                      Chamados Impeditivos
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-blue-950 group-hover:text-rose-600 transition-colors">
+                        Chamados Impeditivos
+                      </h3>
+                      {activeChamadosFiltersCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase tracking-wider border border-emerald-500/20">
+                          Filtrado
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs font-bold text-slate-400">
                       Veículos parados / imobilizados na frota
                     </p>
@@ -919,9 +955,16 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                     <Eye size={20} />
                   </div>
                   <div>
-                    <h3 className="text-base font-black text-blue-950 group-hover:text-amber-600 transition-colors">
-                      Não Impeditivos / Atenção
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-blue-950 group-hover:text-amber-600 transition-colors">
+                        Não Impeditivos / Atenção
+                      </h3>
+                      {activeChamadosFiltersCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase tracking-wider border border-emerald-500/20">
+                          Filtrado
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs font-bold text-slate-400">
                       Veículos rodando com restrição operacional
                     </p>
@@ -1002,7 +1045,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                       <h3 className="text-base font-black text-blue-950 group-hover:text-indigo-600 transition-colors">
                         Oficina Externa
                       </h3>
-                      {(executiveFilters.criticidade !== 'ALL' || executiveFilters.subTipo) && (
+                      {(executiveFilters.criticidade !== 'ALL' || executiveFilters.subTipo || activeChamadosFiltersCount > 0) && (
                         <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 text-[9px] font-black uppercase tracking-wider border border-indigo-500/20">
                           Filtrado
                         </span>
@@ -1093,7 +1136,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                       <h3 className="text-base font-black text-blue-950 group-hover:text-emerald-600 transition-colors">
                         Oficina Interna
                       </h3>
-                      {(executiveFilters.criticidade !== 'ALL' || executiveFilters.subTipo) && (
+                      {(executiveFilters.criticidade !== 'ALL' || executiveFilters.subTipo || activeChamadosFiltersCount > 0) && (
                         <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase tracking-wider border border-emerald-500/20">
                           Filtrado
                         </span>
@@ -1230,7 +1273,8 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                     <span>{tag.label}</span>
                     <button
                       onClick={() => {
-                        if (tag.key === 'search') setSearchQuery('');
+                        if (tag.onRemove) tag.onRemove();
+                        else if (tag.key === 'search') setSearchQuery('');
                         else handleRemoveExecutiveTag(tag.key);
                       }}
                       className="w-4 h-4 rounded-full hover:bg-black/10 dark:hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer"

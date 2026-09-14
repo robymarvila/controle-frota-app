@@ -1406,8 +1406,17 @@ export default function App() {
               descricao: c.defeitoEncontrado || c.defeitoPrincipal,
               categoria: c.defeitoPrincipal || 'Geral',
               status: c.status === 'RESOLVIDO' ? 'RESOLVIDO' : 'PENDENTE',
-              isImpeditivo: true
+              isImpeditivo: true,
+              numeroSolicitacao: c.numero || ''
             }];
+          }
+
+          if (Array.isArray(defs) && defs.length > 0) {
+            defs = defs.map(d => ({
+              ...d,
+              categoria: d.categoria || c.defeitoPrincipal || 'Outros',
+              numeroSolicitacao: d.numeroSolicitacao || c.numero || ''
+            }));
           }
 
           let dWorkflow = c.dadosWorkflow || c.dados_workflow;
@@ -10642,9 +10651,17 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
             };
           }
 
+          const rawDefs = cData.defeitos || prev.defeitos || [];
+          const normalizedDefs = (Array.isArray(rawDefs) ? rawDefs : []).map(d => ({
+            ...d,
+            categoria: d.categoria || cData.defeitoPrincipal || prev.defeitoPrincipal || 'Outros',
+            numeroSolicitacao: d.numeroSolicitacao || cData.numero || prev.numero || ''
+          }));
+
           setFormData(prev => ({
             ...prev,
             ...cData,
+            defeitos: normalizedDefs.length > 0 ? normalizedDefs : prev.defeitos,
             hodometro: cData.hodometro !== null && cData.hodometro !== undefined ? String(cData.hodometro) : (cData.dadosWorkflow?.hodometro || prev.hodometro || ''),
             fotosChamado: cData.dadosWorkflow?.fotosChamado || cData.fotosChamado || prev.fotosChamado || {},
             dataAbertura: formatToDatetimeLocal(cData.dataAbertura || prev.dataAbertura),
@@ -10659,7 +10676,11 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   const [formData, setFormData] = useState(() => {
 
     if (chamadoEdicao) {
-      let legacyDefeitos = chamadoEdicao.defeitos;
+      let legacyDefeitos = (chamadoEdicao.defeitos || []).map(d => ({
+        ...d,
+        categoria: d.categoria || chamadoEdicao.defeitoPrincipal || 'Outros',
+        numeroSolicitacao: d.numeroSolicitacao || chamadoEdicao.numero || ''
+      }));
       if (!legacyDefeitos || legacyDefeitos.length === 0) {
         if (chamadoEdicao.defeitoPrincipal || chamadoEdicao.defeitoEncontrado) {
           legacyDefeitos = [{
@@ -11619,7 +11640,13 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                 if (!formData.motorista) return alert('O Motorista / Colaborador é obrigatório.');
                 if (formData.motorista === 'OUTRO' && !formData.motoristaOutro?.trim()) return alert('Informe o nome do motorista.');
                 
-                const temDefeitoInvalido = formData.defeitos?.some(d => !d.categoria || !d.numeroSolicitacao);
+                const defeitosSanitizados = (formData.defeitos || []).map(d => ({
+                  ...d,
+                  numeroSolicitacao: (d.numeroSolicitacao || formData.numero || '').trim(),
+                  categoria: (d.categoria || formData.defeitoPrincipal || 'Outros').trim()
+                }));
+
+                const temDefeitoInvalido = defeitosSanitizados.some(d => !d.categoria || !d.numeroSolicitacao);
                 if (temDefeitoInvalido) return alert('A Categoria e o Nº SOL (E-CAR) são obrigatórios para todos os defeitos.');
 
                 if (!isEditing) {
@@ -11641,9 +11668,9 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                     setDuplicidadeChamado({ ...openTicket, defeitos: legacyDefeitos || [] });
                     setModalDuplicidadeStep(1);
                     setEscalonamentoMotivo('');
-                    setNovoDefeitoDescricao(formData.defeitos && formData.defeitos[0]?.descricao || '');
-                    setNovoDefeitoCategoria(formData.defeitos && formData.defeitos[0]?.categoria || '');
-                    setNovoDefeitoECar(formData.defeitos && formData.defeitos[0]?.numeroSolicitacao || '');
+                    setNovoDefeitoDescricao(defeitosSanitizados && defeitosSanitizados[0]?.descricao || '');
+                    setNovoDefeitoCategoria(defeitosSanitizados && defeitosSanitizados[0]?.categoria || '');
+                    setNovoDefeitoECar(defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao || '');
                     return;
                   }
                 }
@@ -11654,15 +11681,16 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
                 const submitData = {
                   ...dadosSemCamposVirtuais, 
+                  defeitos: defeitosSanitizados,
                   dadosWorkflow: {
                     ...(formData.dadosWorkflow || {}),
                     ...(fotosChamado ? { fotosChamado } : {})
                   },
                   motorista: finalMotorista,
                   status: 'ABERTO',
-                  numero: (formData.defeitos && formData.defeitos[0]?.numeroSolicitacao) || '',
-                  defeitoPrincipal: (formData.defeitos && formData.defeitos[0]?.categoria) || '',
-                  defeitoEncontrado: (formData.defeitos && formData.defeitos[0]?.descricao) || ''
+                  numero: (defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao) || formData.numero || '',
+                  defeitoPrincipal: (defeitosSanitizados && defeitosSanitizados[0]?.categoria) || formData.defeitoPrincipal || '',
+                  defeitoEncontrado: (defeitosSanitizados && defeitosSanitizados[0]?.descricao) || formData.defeitoEncontrado || ''
                 };
                 onSubmit(submitData);
                 if (!isEditing) {
@@ -11786,7 +11814,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                         <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Categoria</label>
                         <select 
                           required
-                          disabled={isFrota && isEditing}
+                          disabled={isFrota && isEditing && !!defeito.categoria}
                           value={defeito.categoria || ''} 
                           onChange={e => updateDefeito(defeito.id, 'categoria', e.target.value)} 
                           className="w-full p-2.5 bg-white rounded-lg font-bold text-xs text-slate-700 outline-none border border-slate-200 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
@@ -11806,7 +11834,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                         <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Nº SOL (E-CAR)</label>
                         <input 
                           required
-                          disabled={isFrota && isEditing}
+                          disabled={isFrota && isEditing && !!defeito.numeroSolicitacao}
                           type="text" 
                           value={defeito.numeroSolicitacao || ''} 
                           onChange={e => updateDefeito(defeito.id, 'numeroSolicitacao', e.target.value.toUpperCase())} 
