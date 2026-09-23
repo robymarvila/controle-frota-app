@@ -491,7 +491,7 @@ export default function MecanicoView({
   const handleToggleDefeito = (defeitoId) => {
     if (!solicitarChamado) return;
     const updatedDefeitos = (solicitarChamado.defeitos || []).map(d =>
-      d.id === defeitoId ? { ...d, status: d.status === 'RESOLVIDO' ? 'PENDENTE' : 'RESOLVIDO', dataResolucao: d.status === 'RESOLVIDO' ? null : new Date().toISOString() } : d
+      String(d.id) === String(defeitoId) ? { ...d, status: d.status === 'RESOLVIDO' ? 'PENDENTE' : 'RESOLVIDO', dataResolucao: d.status === 'RESOLVIDO' ? null : new Date().toISOString() } : d
     );
     const updated = { ...solicitarChamado, defeitos: updatedDefeitos, silentSave: true };
     setSolicitarChamado(updated);

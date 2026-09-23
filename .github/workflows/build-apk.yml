@@ -42,7 +42,7 @@ jobs:
       - name: Build Android Release APK (Signed)
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease -Dorg.gradle.java.home=$JAVA_HOME --no-daemon --stacktrace
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4

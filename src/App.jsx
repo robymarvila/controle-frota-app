@@ -17,7 +17,7 @@ import {
 
   ClipboardCheck, Sun, Moon, Home, ChevronDown
 
-, KeyRound, Loader, Shield, ShieldAlert, Globe, Zap, AlertOctagon, FileWarning, Info, FileSignature, Map as MapIcon, Camera, FileClock, Sparkles, Building2, Mail } from 'lucide-react';
+, KeyRound, Loader, Shield, ShieldAlert, Globe, Zap, AlertOctagon, FileWarning, Info, FileSignature, Map as MapIcon, Camera, FileClock, Sparkles, Building2, Mail, Image as ImageIcon } from 'lucide-react';
 
 import forcaData from './forcaData.json';
 
@@ -55,6 +55,8 @@ import ModalDefinirSenhaProvisoria from './components/ModalDefinirSenhaProvisori
 import { normalizeKey, hashPassword, verifyPassword, validatePasswordStrength } from './utils/security';
 import { gpsService } from './services/gpsService';
 import { compressImageToDataUrl } from './utils/imageCompressor';
+import ModalEvidenciasObrigatorias from './components/ModalEvidenciasObrigatorias';
+import { capturePhotoUnified } from './utils/photoCapture';
 
 // --- CONFIGURAÇÕES E DADOS INICIAIS ---
 
@@ -2523,11 +2525,37 @@ export default function App() {
       descricao: logDesc
     };
 
-    const { dadosWorkflow: extrasDadosWorkflow, ...outrosExtras } = extras;
+    const { dadosWorkflow: extrasDadosWorkflow, defeitos: extrasDefeitos, ...outrosExtras } = extras;
+
+    let defeitosProcessados = extrasDefeitos || antigo.defeitos || [];
+
+    // Blindagem de Segurança para 'Liberado Operação':
+    if (novaEtapa === 'Liberado Operação') {
+      // Se a Frota aprovou a liberação solicitada pelo mecânico, assegurar marcação de resolvido
+      if (extrasDadosWorkflow?.solicitacaoLiberacao?.status === 'APROVADA') {
+        defeitosProcessados = defeitosProcessados.map(d => ({
+          ...d,
+          status: 'RESOLVIDO',
+          dataResolucao: d.dataResolucao || dataHoraIso
+        }));
+      }
+
+      // Validação de segurança estrita: 100% dos defeitos devem estar marcados como RESOLVIDO
+      const pendentesLiberacao = (defeitosProcessados || []).filter(d => d.status !== 'RESOLVIDO');
+      if (pendentesLiberacao.length > 0) {
+        showFeedback(
+          'warning',
+          'Liberação Bloqueada',
+          `Não é possível liberar o veículo para operação pois ainda existem ${pendentesLiberacao.length} defeito(s) pendente(s) de resolução no checklist. Todos os defeitos devem ser marcados como resolvidos.`
+        );
+        return;
+      }
+    }
 
     const chamadoFinal = {
       ...antigo,
       etapaWorkflow: novaEtapa,
+      defeitos: defeitosProcessados,
       dadosWorkflow: {
         ...(antigo.dadosWorkflow || {}),
         ...(extrasDadosWorkflow || {}),
@@ -2928,6 +2956,9 @@ export default function App() {
       ...chamadoOriginal, 
       status: 'RESOLVIDO', 
       etapaWorkflow: 'RESOLVIDO', 
+      defeitos: temPendencia === 'NÃO'
+        ? (chamadoOriginal.defeitos || []).map(d => ({ ...d, status: 'RESOLVIDO', dataResolucao: d.dataResolucao || dataHoraLog }))
+        : (chamadoOriginal.defeitos || []),
       dadosWorkflow: {
         ...(chamadoOriginal.dadosWorkflow || {}),
         timestamps: {
@@ -10731,6 +10762,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   const [successData, setSuccessData] = useState(null);
   const [subModalResolveDefeitos, setSubModalResolveDefeitos] = useState(null);
   const [selectedImagePreview, setSelectedImagePreview] = useState(null);
+  const [modalFotosObrigatoriasOpen, setModalFotosObrigatoriasOpen] = useState(false);
 
   const [duplicidadeChamado, setDuplicidadeChamado] = useState(null);
   const [modalDuplicidadeStep, setModalDuplicidadeStep] = useState(1);
@@ -10960,20 +10992,20 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
     if ((formData.defeitos || []).length <= 1) return;
     setFormData(prev => ({
       ...prev,
-      defeitos: (prev.defeitos || []).filter(d => d.id !== defId)
+      defeitos: (prev.defeitos || []).filter(d => String(d.id) !== String(defId))
     }));
   };
 
   const updateDefeito = (defId, field, value) => {
     setFormData(prev => ({
       ...prev,
-      defeitos: (prev.defeitos || []).map(d => d.id === defId ? { ...d, [field]: value } : d)
+      defeitos: (prev.defeitos || []).map(d => String(d.id) === String(defId) ? { ...d, [field]: value } : d)
     }));
   };
 
   const toggleDefeitoStatus = (defId) => {
     const updated = (formData.defeitos || []).map(d => 
-      d.id === defId ? { ...d, status: d.status === 'RESOLVIDO' ? 'PENDENTE' : 'RESOLVIDO', dataResolucao: d.status === 'RESOLVIDO' ? null : new Date().toISOString() } : d
+      String(d.id) === String(defId) ? { ...d, status: d.status === 'RESOLVIDO' ? 'PENDENTE' : 'RESOLVIDO', dataResolucao: d.status === 'RESOLVIDO' ? null : new Date().toISOString() } : d
     );
     setFormData(prev => ({ ...prev, defeitos: updated }));
     // Salva silenciosamente sem fechar o modal
@@ -11088,7 +11120,8 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
   const handleWorkflowAction = (novaEtapa, logDesc, extras = {}) => {
     if (novaEtapa === 'Liberado Operação') {
-      const defeitosPendentes = (formData.defeitos || []).filter(d => d.status !== 'RESOLVIDO');
+      const currentDefs = extras.defeitos || formData.defeitos || [];
+      const defeitosPendentes = currentDefs.filter(d => d.status !== 'RESOLVIDO');
       if (defeitosPendentes.length > 0) {
         setSubModalResolveDefeitos({ novaEtapa, logDesc, extras });
         return;
@@ -11098,22 +11131,15 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
     let finalDesc = logDesc;
 
     if (transitionComment.trim()) {
-
       finalDesc += ` (Obs: ${transitionComment.trim()})`;
-
     }
 
     if (onWorkflowTransition && isEditing) {
-
       onWorkflowTransition(formData.id, novaEtapa, finalDesc, extras);
-
     }
 
     setTransitionComment('');
-
   };
-
-
 
   const handleDuplicidadeAction = async (actionType) => {
     if (!duplicidadeChamado) return;
@@ -11133,16 +11159,48 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
         fotoDefeito: novoDefeitoFoto
       };
       updatedChamado.defeitos = [...(updatedChamado.defeitos || []), novoDef];
+
+      // Se o chamado já estava em etapas de liberação ou concluído, ele DEVE regredir para 'Análise Frota'
+      // pois uma nova avaria impeditiva foi adicionada e o veículo não pode permanecer como Liberado!
+      const etapasQueDevemRegredir = ['Liberado Operação', 'Aguardando Validação Frota', 'RESOLVIDO'];
+      const etapaAtual = updatedChamado.etapaWorkflow || 'Análise Frota';
+      const deveRegredir = etapasQueDevemRegredir.includes(etapaAtual);
+
+      if (deveRegredir) {
+        updatedChamado.etapaWorkflow = 'Análise Frota';
+        updatedChamado.status = 'ABERTO';
+        updatedChamado.situacaoVeiculo = 'PARADO';
+      }
+
+      const logMsg = deveRegredir 
+        ? `Novo defeito adicionado (${novoDefeitoCategoria}): ${novoDefeitoDescricao}. Chamado regrediu de "${etapaAtual}" para "Análise Frota" por conter nova avaria impeditiva.`
+        : `Novo defeito adicionado (${novoDefeitoCategoria}): ${novoDefeitoDescricao}`;
+
       newLog = {
         acao: 'NOVO_DEFEITO_DUPLICIDADE',
         data: new Date().toISOString(),
-        usuario: currentUser.login,
-        detalhes: `Novo defeito adicionado (${novoDefeitoCategoria}): ${novoDefeitoDescricao}`
+        usuario: currentUser.login || currentUser.nome || 'Sistema',
+        detalhes: logMsg
       };
+
+      // Registrar na tabela relacional imutável chamados_historico
+      supabase
+        .from('chamados_historico')
+        .insert([{
+          chamado_id: updatedChamado.id,
+          data_hora: new Date().toISOString(),
+          usuario: currentUser.nome || currentUser.login || 'Sistema',
+          acao: deveRegredir ? 'REGRESSÃO_WORKFLOW' : 'NOVO_DEFEITO',
+          descricao: logMsg,
+          etapa_anterior: etapaAtual,
+          etapa_nova: updatedChamado.etapaWorkflow
+        }])
+        .then(() => {}, err => console.error('Erro ao salvar historico de duplicidade:', err));
+
       newAlerta = {
         id: Date.now().toString(),
         tipo: 'NOVO_DEFEITO',
-        mensagem: `Novo defeito adicionado na placa ${updatedChamado.placa}: ${novoDefeitoDescricao}`,
+        mensagem: `Novo defeito adicionado na placa ${updatedChamado.placa}: ${novoDefeitoDescricao}${deveRegredir ? ' (Retornou para Análise Frota)' : ''}`,
         timestamp: new Date().toISOString(),
         acknowledgedBy: []
       };
@@ -11153,6 +11211,19 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
         usuario: currentUser.login,
         detalhes: `Chamado escalonado. Motivo: ${escalonamentoMotivo}`
       };
+      supabase
+        .from('chamados_historico')
+        .insert([{
+          chamado_id: updatedChamado.id,
+          data_hora: new Date().toISOString(),
+          usuario: currentUser.nome || currentUser.login || 'Sistema',
+          acao: 'ESCALONAMENTO',
+          descricao: `Chamado escalonado. Motivo: ${escalonamentoMotivo}`,
+          etapa_anterior: updatedChamado.etapaWorkflow,
+          etapa_nova: updatedChamado.etapaWorkflow
+        }])
+        .then(() => {}, err => console.error('Erro ao salvar historico de escalonamento:', err));
+
       newAlerta = {
         id: Date.now().toString(),
         tipo: 'ESCALONAMENTO',
@@ -11640,71 +11711,97 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
 
 
-          <form id="chamadoForm" onSubmit={e => { e.preventDefault(); (() => {
-                if (!formData.placa) return alert('A Placa do Veículo é obrigatória.');
-                if (!formData.hodometro || !String(formData.hodometro).trim()) return alert('O Hodômetro (KM) é obrigatório para abertura ou edição do chamado.');
-                if (!formData.motorista) return alert('O Motorista / Colaborador é obrigatório.');
-                if (formData.motorista === 'OUTRO' && !formData.motoristaOutro?.trim()) return alert('Informe o nome do motorista.');
+          <form id="chamadoForm" onSubmit={e => {
+            e.preventDefault();
+            (() => {
+              if (!formData.placa) {
+                return showFeedbackLocal('warning', 'Placa Obrigatória', 'A Placa do Veículo é obrigatória para a abertura do chamado.');
+              }
+              if (!formData.hodometro || !String(formData.hodometro).trim()) {
+                return showFeedbackLocal('warning', 'Hodômetro Obrigatório', 'O Hodômetro (KM) é obrigatório para abertura ou edição do chamado.');
+              }
+              if (!formData.motorista) {
+                return showFeedbackLocal('warning', 'Motorista Obrigatório', 'O Motorista / Colaborador é obrigatório.');
+              }
+              if (formData.motorista === 'OUTRO' && !formData.motoristaOutro?.trim()) {
+                return showFeedbackLocal('warning', 'Nome do Motorista', 'Por favor, informe o nome do motorista.');
+              }
+              
+              const defeitosSanitizados = (formData.defeitos || []).map(d => ({
+                ...d,
+                numeroSolicitacao: (d.numeroSolicitacao || formData.numero || '').trim(),
+                categoria: (d.categoria || formData.defeitoPrincipal || 'Outros').trim()
+              }));
+
+              const temDefeitoInvalido = defeitosSanitizados.some(d => !d.categoria || !d.numeroSolicitacao);
+              if (temDefeitoInvalido) {
+                return showFeedbackLocal('warning', 'Defeitos Incompletos', 'A Categoria e o Nº SOL (E-CAR) são obrigatórios para todos os defeitos reportados.');
+              }
+
+              // ★ VALIDAÇÃO OBRIGATÓRIA DE EVIDÊNCIAS FOTOGRÁFICAS NA ABERTURA
+              if (!isEditing) {
+                const fotosAtuais = formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {};
+                const temFotoVeiculo = Boolean(fotosAtuais.fotoVeiculo);
+                const temFotoHodometro = Boolean(fotosAtuais.fotoHodometro);
+                const defeitosFaltandoFoto = defeitosSanitizados.filter(d => !Boolean(d.fotoDefeito));
                 
-                const defeitosSanitizados = (formData.defeitos || []).map(d => ({
-                  ...d,
-                  numeroSolicitacao: (d.numeroSolicitacao || formData.numero || '').trim(),
-                  categoria: (d.categoria || formData.defeitoPrincipal || 'Outros').trim()
-                }));
+                if (!temFotoVeiculo || !temFotoHodometro || defeitosFaltandoFoto.length > 0) {
+                  setModalFotosObrigatoriasOpen(true);
+                  return;
+                }
+              }
 
-                const temDefeitoInvalido = defeitosSanitizados.some(d => !d.categoria || !d.numeroSolicitacao);
-                if (temDefeitoInvalido) return alert('A Categoria e o Nº SOL (E-CAR) são obrigatórios para todos os defeitos.');
-
-                if (!isEditing) {
-                  const openTicket = (rawChamados || []).find(c => (c.placa || '').trim().toUpperCase() === (formData.placa || '').trim().toUpperCase() && c.status !== 'RESOLVIDO');
-                  if (openTicket) {
-                    let legacyDefeitos = openTicket.defeitos;
-                    if (!legacyDefeitos || legacyDefeitos.length === 0) {
-                      if (openTicket.defeitoPrincipal || openTicket.defeitoEncontrado) {
-                        legacyDefeitos = [{
-                          id: Date.now(),
-                          descricao: openTicket.defeitoEncontrado || 'Sem descrição',
-                          categoria: openTicket.defeitoPrincipal || 'Outros',
-                          isImpeditivo: true,
-                          status: 'PENDENTE',
-                          numeroSolicitacao: openTicket.numero || ''
-                        }];
-                      }
+              if (!isEditing) {
+                const openTicket = (rawChamados || []).find(c => (c.placa || '').trim().toUpperCase() === (formData.placa || '').trim().toUpperCase() && c.status !== 'RESOLVIDO');
+                if (openTicket) {
+                  let legacyDefeitos = openTicket.defeitos;
+                  if (!legacyDefeitos || legacyDefeitos.length === 0) {
+                    if (openTicket.defeitoPrincipal || openTicket.defeitoEncontrado) {
+                      legacyDefeitos = [{
+                        id: Date.now(),
+                        descricao: openTicket.defeitoEncontrado || 'Sem descrição',
+                        categoria: openTicket.defeitoPrincipal || 'Outros',
+                        isImpeditivo: true,
+                        status: 'PENDENTE',
+                        numeroSolicitacao: openTicket.numero || ''
+                      }];
                     }
-                    setDuplicidadeChamado({ ...openTicket, defeitos: legacyDefeitos || [] });
-                    setModalDuplicidadeStep(1);
-                    setEscalonamentoMotivo('');
-                    setNovoDefeitoDescricao(defeitosSanitizados && defeitosSanitizados[0]?.descricao || '');
-                    setNovoDefeitoCategoria(defeitosSanitizados && defeitosSanitizados[0]?.categoria || '');
-                    setNovoDefeitoECar(defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao || '');
-                    return;
                   }
+                  setDuplicidadeChamado({ ...openTicket, defeitos: legacyDefeitos || [] });
+                  setModalDuplicidadeStep(1);
+                  setEscalonamentoMotivo('');
+                  setNovoDefeitoDescricao(defeitosSanitizados && defeitosSanitizados[0]?.descricao || '');
+                  setNovoDefeitoCategoria(defeitosSanitizados && defeitosSanitizados[0]?.categoria || '');
+                  setNovoDefeitoECar(defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao || '');
+                  return;
                 }
+              }
 
-                const finalMotorista = formData.motorista === 'OUTRO' ? formData.motoristaOutro : formData.motorista;
-                
-                const { motoristaOutro, fotosChamado, ...dadosSemCamposVirtuais } = formData;
+              const finalMotorista = formData.motorista === 'OUTRO' ? formData.motoristaOutro : formData.motorista;
+              
+              const { motoristaOutro, fotosChamado, ...dadosSemCamposVirtuais } = formData;
 
-                const submitData = {
-                  ...dadosSemCamposVirtuais, 
-                  defeitos: defeitosSanitizados,
-                  dadosWorkflow: {
-                    ...(formData.dadosWorkflow || {}),
-                    ...(fotosChamado ? { fotosChamado } : {})
-                  },
-                  motorista: finalMotorista,
-                  status: 'ABERTO',
-                  numero: (defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao) || formData.numero || '',
-                  defeitoPrincipal: (defeitosSanitizados && defeitosSanitizados[0]?.categoria) || formData.defeitoPrincipal || '',
-                  defeitoEncontrado: (defeitosSanitizados && defeitosSanitizados[0]?.descricao) || formData.defeitoEncontrado || ''
-                };
-                onSubmit(submitData);
-                if (!isEditing) {
-                  const _id = Date.now();
-                  setSuccessData({ codigoChamado: 'ALP.M-' + String(_id).slice(-6), placa: formData.placa, dataAbertura: formData.dataAbertura, defeitos: formData.defeitos || [] });
-                  setShowSuccess(true);
-                }
-              })(); }} className="flex flex-col gap-4 sm:grid sm:grid-cols-2 sm:gap-4">
+              const submitData = {
+                ...dadosSemCamposVirtuais, 
+                defeitos: defeitosSanitizados,
+                dadosWorkflow: {
+                  ...(formData.dadosWorkflow || {}),
+                  ...(fotosChamado ? { fotosChamado } : {})
+                },
+                motorista: finalMotorista,
+                status: 'ABERTO',
+                numero: (defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao) || formData.numero || '',
+                defeitoPrincipal: (defeitosSanitizados && defeitosSanitizados[0]?.categoria) || formData.defeitoPrincipal || '',
+                defeitoEncontrado: (defeitosSanitizados && defeitosSanitizados[0]?.descricao) || formData.defeitoEncontrado || ''
+              };
+              onSubmit(submitData);
+              if (!isEditing) {
+                const _id = Date.now();
+                setSuccessData({ codigoChamado: 'ALP.M-' + String(_id).slice(-6), placa: formData.placa, dataAbertura: formData.dataAbertura, defeitos: formData.defeitos || [] });
+                setShowSuccess(true);
+              }
+            })();
+          }} className="flex flex-col gap-4 sm:grid sm:grid-cols-2 sm:gap-4">
 
             {/* 1. PLACA DO VEÍCULO */}
             <div className="w-full sm:col-span-2">
@@ -11872,11 +11969,17 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                     </div>
 
                     {/* Foto específica do Defeito #{idx + 1} */}
-                    <div className="mt-3 pt-3 border-t border-slate-200/70 flex items-center justify-between gap-3 bg-white p-2.5 rounded-xl border border-slate-100 shadow-sm">
+                    <div className="mt-3 pt-3 border-t border-slate-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700 shadow-xs">
                       <div className="flex items-center gap-2">
-                        <Camera size={16} className="text-blue-600" />
-                        <span className="text-[10px] font-black text-slate-700 uppercase">Foto do Defeito #{idx + 1}</span>
-                        <span className="text-[9px] font-bold text-slate-400">(Inicialmente Opcional)</span>
+                        <Camera size={16} className="text-blue-600 shrink-0" />
+                        <span className="text-[10px] font-black text-slate-700 dark:text-slate-200 uppercase">Foto do Defeito #{idx + 1}</span>
+                        <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${
+                          defeito.fotoDefeito
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                            : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 animate-pulse'
+                        }`}>
+                          {defeito.fotoDefeito ? '✓ Anexada' : 'Obrigatório *'}
+                        </span>
                       </div>
                       {defeito.fotoDefeito ? (
                         <div className="flex items-center gap-2">
@@ -11884,41 +11987,65 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                             src={defeito.fotoDefeito} 
                             alt={`Defeito #${idx+1}`} 
                             onClick={() => setSelectedImagePreview({ url: defeito.fotoDefeito, label: `Foto do Defeito #${idx+1} - ${defeito.categoria || 'Geral'}` })} 
-                            className="w-10 h-10 object-cover rounded-lg border border-slate-200 cursor-zoom-in hover:opacity-90 transition-opacity" 
+                            className="w-11 h-10 object-cover rounded-lg border border-slate-200 dark:border-slate-700 cursor-zoom-in hover:opacity-90 transition-opacity" 
                             title="Clique para expandir foto"
                           />
                           <button
                             type="button"
+                            onClick={async () => {
+                              const novaFoto = await capturePhotoUnified('camera');
+                              if (novaFoto) updateDefeito(defeito.id, 'fotoDefeito', novaFoto);
+                            }}
+                            className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-xs font-bold transition-colors"
+                            title="Tirar outra foto com Câmera"
+                          >
+                            <Camera size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const novaFoto = await capturePhotoUnified('photos');
+                              if (novaFoto) updateDefeito(defeito.id, 'fotoDefeito', novaFoto);
+                            }}
+                            className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-xs font-bold transition-colors"
+                            title="Substituir pela Galeria"
+                          >
+                            <ImageIcon size={13} />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => updateDefeito(defeito.id, 'fotoDefeito', null)}
                             className="p-1.5 bg-rose-100 text-rose-600 hover:bg-rose-200 rounded-lg transition-colors text-xs font-bold"
+                            title="Remover foto"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={13} />
                           </button>
                         </div>
                       ) : (
-                        <label className="px-3 py-1.5 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-lg text-xs font-bold border border-slate-200 cursor-pointer flex items-center gap-1.5 transition-colors">
-                          <Camera size={14} /> Anexar Foto
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={async (e) => {
-                              const file = e.target.files[0];
-                              if (file) {
-                                try {
-                                  const compressed = await compressImageToDataUrl(file);
-                                  updateDefeito(defeito.id, 'fotoDefeito', compressed);
-                                } catch (err) {
-                                  const reader = new FileReader();
-                                  reader.onloadend = () => {
-                                    updateDefeito(defeito.id, 'fotoDefeito', reader.result);
-                                  };
-                                  reader.readAsDataURL(file);
-                                }
-                              }
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const novaFoto = await capturePhotoUnified('camera');
+                              if (novaFoto) updateDefeito(defeito.id, 'fotoDefeito', novaFoto);
                             }}
-                          />
-                        </label>
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-xs transition-all"
+                          >
+                            <Camera size={13} />
+                            <span>Câmera</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const novaFoto = await capturePhotoUnified('photos');
+                              if (novaFoto) updateDefeito(defeito.id, 'fotoDefeito', novaFoto);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 active:scale-95 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-all"
+                          >
+                            <ImageIcon size={13} />
+                            <span>Galeria</span>
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -11956,47 +12083,65 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
             )}
 
-            {/* ★ BANNER INFORMATIVO SOBRE FOTOS (TRANSIÇÃO P/ OBRIGATÓRIO) */}
-            <div className="col-span-2 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-2xl p-4 flex items-start gap-3 animate-in fade-in duration-300">
-              <AlertTriangle className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" size={18} />
-              <div>
-                <h5 className="text-xs font-black text-amber-900 dark:text-amber-200 uppercase tracking-wider">Aviso de Transição de Evidências Fotográficas</h5>
-                <p className="text-xs text-amber-800/90 dark:text-amber-300 font-medium mt-0.5 leading-relaxed">
-                  No momento, o anexo de fotos no chamado é opcional. <strong>Em breve, o upload das evidências fotográficas (Fachada, Hodômetro e Defeitos) passará a ser 100% obrigatório</strong> para a abertura e liberação do chamado. Recomendamos realizar o anexo desde já.
+            {/* ★ BANNER DE CONFORMIDADE E OBRIGATORIEDADE FOTOGRÁFICA */}
+            <div className="col-span-2 bg-gradient-to-r from-emerald-50 via-teal-50/50 to-blue-50/50 dark:from-emerald-950/40 dark:via-teal-950/20 dark:to-slate-900 border border-emerald-200/80 dark:border-emerald-800/60 rounded-2xl p-4 flex items-start gap-3.5 shadow-xs animate-in fade-in duration-300">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20 shadow-xs mt-0.5">
+                <ShieldCheck size={20} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h5 className="text-xs font-black text-emerald-950 dark:text-emerald-200 uppercase tracking-wider">Registro Fotográfico Obrigatório</h5>
+                  <span className="text-[9px] font-black uppercase bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 px-2 py-0.5 rounded-md">Conformidade Operacional</span>
+                </div>
+                <p className="text-xs text-emerald-900/80 dark:text-emerald-300/80 font-medium mt-0.5 leading-relaxed">
+                  Para garantir a integridade técnica da frota, o anexo de fotos da <strong>Fachada do Veículo</strong>, do <strong>Hodômetro (KM)</strong> e de <strong>cada Defeito reportado</strong> é 100% obrigatório para a abertura do chamado.
                 </p>
               </div>
             </div>
 
-            {/* ★ ANEXO DE FOTOS GERAIS (3 SLOTS OPCIONAIS) */}
-            <div className="col-span-2 bg-gradient-to-br from-slate-50 to-blue-50/30 rounded-2xl p-4 border border-slate-200/80 space-y-3">
+            {/* ★ ANEXO DE FOTOS GERAIS DA FROTA */}
+            <div className="col-span-2 bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-slate-900/60 dark:to-blue-950/20 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider flex items-center gap-1.5">
-                  <Camera size={14} className="text-blue-600" /> Registro Fotográfico Geral (3 Fotos Inicialmente Opcionais)
+                <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1.5">
+                  <Camera size={14} className="text-blue-600" /> Registro Fotográfico Geral da Frota
                 </span>
-                <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md">
-                  Preparo p/ Obrigatoriedade
+                <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md flex items-center gap-1">
+                  <ShieldCheck size={11} /> Fachada e KM Obrigatórios
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
-                  { key: 'fotoVeiculo', label: '1. Veículo (Fachada)' },
-                  { key: 'fotoHodometro', label: '2. Hodômetro (KM)' },
-                  { key: 'fotoAdicional', label: '3. Foto Adicional' }
+                  { key: 'fotoVeiculo', label: '1. Veículo (Fachada)', obrigatorio: true },
+                  { key: 'fotoHodometro', label: '2. Hodômetro (KM)', obrigatorio: true },
+                  { key: 'fotoAdicional', label: '3. Foto Adicional', obrigatorio: false }
                 ].map((item) => {
-
                   const fotoUrl = formData.fotosChamado?.[item.key] || formData.dadosWorkflow?.fotosChamado?.[item.key];
+                  const isAnexada = Boolean(fotoUrl);
 
                   return (
-
-                    <div key={item.key} className="bg-white p-2.5 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center relative group">
-
-                      <span className="text-[9px] font-black text-slate-500 mb-2 truncate w-full">{item.label}</span>
+                    <div key={item.key} className={`p-3 rounded-xl border flex flex-col items-center justify-between text-center relative group transition-all ${
+                      isAnexada
+                        ? 'bg-white dark:bg-slate-800 border-emerald-200 dark:border-emerald-800/60 shadow-xs'
+                        : item.obrigatorio
+                        ? 'bg-amber-50/40 dark:bg-amber-950/20 border-2 border-dashed border-amber-300 dark:border-amber-700/60'
+                        : 'bg-white dark:bg-slate-800 border-dashed border-slate-200 dark:border-slate-700'
+                    }`}>
+                      <div className="flex items-center justify-between w-full mb-2">
+                        <span className="text-[9px] font-black text-slate-700 dark:text-slate-300 truncate">{item.label}</span>
+                        <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${
+                          isAnexada
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                            : item.obrigatorio
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                            : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                        }`}>
+                          {isAnexada ? '✓ Anexada' : item.obrigatorio ? 'Obrigatório *' : 'Opcional'}
+                        </span>
+                      </div>
 
                       {fotoUrl ? (
-
-                        <div className="relative w-full h-24 rounded-lg overflow-hidden border border-slate-100 group">
-
+                        <div className="relative w-full h-24 rounded-lg overflow-hidden border border-slate-100 dark:border-slate-700 group shadow-xs">
                           <img 
                             src={fotoUrl} 
                             alt={item.label} 
@@ -12004,99 +12149,95 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                             className="w-full h-full object-cover cursor-zoom-in hover:opacity-90 transition-opacity" 
                             title="Clique para expandir foto"
                           />
-
-                          <button
-
-                            type="button"
-
-                            onClick={() => {
-                              const newFotos = { ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}), [item.key]: null };
-                              setFormData({
-                                ...formData,
-                                fotosChamado: newFotos,
-                                dadosWorkflow: {
-                                  ...(formData.dadosWorkflow || {}),
-                                  fotosChamado: newFotos
+                          <div className="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const novaFoto = await capturePhotoUnified('camera');
+                                if (novaFoto) {
+                                  const newFotos = { ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}), [item.key]: novaFoto };
+                                  setFormData({ ...formData, fotosChamado: newFotos, dadosWorkflow: { ...(formData.dadosWorkflow || {}), fotosChamado: newFotos } });
                                 }
-                              });
-                            }}
-
-                            className="absolute top-1 right-1 bg-rose-600 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
-
-                          >
-
-                            <Trash2 size={12} />
-
-                          </button>
-
+                              }}
+                              className="bg-blue-600 text-white p-1 rounded-full shadow-md hover:bg-blue-700"
+                              title="Tirar outra foto com Câmera"
+                            >
+                              <Camera size={11} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const novaFoto = await capturePhotoUnified('photos');
+                                if (novaFoto) {
+                                  const newFotos = { ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}), [item.key]: novaFoto };
+                                  setFormData({ ...formData, fotosChamado: newFotos, dadosWorkflow: { ...(formData.dadosWorkflow || {}), fotosChamado: newFotos } });
+                                }
+                              }}
+                              className="bg-indigo-600 text-white p-1 rounded-full shadow-md hover:bg-indigo-700"
+                              title="Substituir pela Galeria"
+                            >
+                              <ImageIcon size={11} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newFotos = { ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}), [item.key]: null };
+                                setFormData({
+                                  ...formData,
+                                  fotosChamado: newFotos,
+                                  dadosWorkflow: {
+                                    ...(formData.dadosWorkflow || {}),
+                                    fotosChamado: newFotos
+                                  }
+                                });
+                              }}
+                              className="bg-rose-600 text-white p-1 rounded-full shadow-md hover:bg-rose-700"
+                              title="Remover foto"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
                         </div>
-
                       ) : (
-
-                        <label className="w-full h-24 border-2 border-dashed border-slate-200 hover:border-blue-400 rounded-lg flex flex-col items-center justify-center cursor-pointer bg-slate-50/50 hover:bg-blue-50/50 transition-all p-2">
-
-                          <Camera size={20} className="text-slate-400 mb-1" />
-
-                          <span className="text-[9px] font-bold text-slate-400">Anexar Foto</span>
-
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={async (e) => {
-                              const file = e.target.files[0];
-                              if (file) {
-                                try {
-                                  const compressed = await compressImageToDataUrl(file);
-                                  const newFotos = {
-                                    ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}),
-                                    [item.key]: compressed
-                                  };
-                                  setFormData({
-                                    ...formData,
-                                    fotosChamado: newFotos,
-                                    dadosWorkflow: {
-                                      ...(formData.dadosWorkflow || {}),
-                                      fotosChamado: newFotos
-                                    }
-                                  });
-                                } catch (err) {
-                                  const reader = new FileReader();
-                                  reader.onloadend = () => {
-                                    const newFotos = {
-                                      ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}),
-                                      [item.key]: reader.result
-                                    };
-                                    setFormData({
-                                      ...formData,
-                                      fotosChamado: newFotos,
-                                      dadosWorkflow: {
-                                        ...(formData.dadosWorkflow || {}),
-                                        fotosChamado: newFotos
-                                      }
-                                    });
-                                  };
-                                  reader.readAsDataURL(file);
+                        <div className="w-full h-24 flex flex-col items-center justify-center p-2">
+                          <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 mb-2">Selecione a origem:</p>
+                          <div className="flex items-center gap-1.5 w-full">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const novaFoto = await capturePhotoUnified('camera');
+                                if (novaFoto) {
+                                  const newFotos = { ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}), [item.key]: novaFoto };
+                                  setFormData({ ...formData, fotosChamado: newFotos, dadosWorkflow: { ...(formData.dadosWorkflow || {}), fotosChamado: newFotos } });
                                 }
-                              }
-                            }}
-                          />
-
-                        </label>
-
+                              }}
+                              className="flex-1 py-1.5 px-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-[9px] font-black flex items-center justify-center gap-1 shadow-xs transition-all"
+                            >
+                              <Camera size={11} />
+                              <span>Câmera</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const novaFoto = await capturePhotoUnified('photos');
+                                if (novaFoto) {
+                                  const newFotos = { ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}), [item.key]: novaFoto };
+                                  setFormData({ ...formData, fotosChamado: newFotos, dadosWorkflow: { ...(formData.dadosWorkflow || {}), fotosChamado: newFotos } });
+                                }
+                              }}
+                              className="flex-1 py-1.5 px-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 active:scale-95 text-slate-700 dark:text-slate-200 rounded-lg text-[9px] font-black flex items-center justify-center gap-1 transition-all"
+                            >
+                              <ImageIcon size={11} />
+                              <span>Galeria</span>
+                            </button>
+                          </div>
+                        </div>
                       )}
-
                     </div>
-
                   );
-
                 })}
-
               </div>
-
             </div>
-
-
 
           </form>
 
@@ -12176,7 +12317,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
                   onClick={() => {
 
-                    if (!recusaMotivo.trim()) return alert('Informe o motivo da recusa!');
+                    if (!recusaMotivo.trim()) return showFeedbackLocal('warning', 'Motivo Obrigatório', 'Informe o motivo da recusa do veículo para prosseguir.');
 
                     handleWorkflowAction(
 
@@ -12646,7 +12787,13 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                           type="button"
                           onClick={() => {
                             const logMsg = `Frota (${currentUser?.nome || 'Usuário'}) avaliou e aprovou o relatório técnico do mecânico, liberando o veículo para Operação.`;
+                            const defeitosAprovados = (formData.defeitos || []).map(d => ({
+                              ...d,
+                              status: 'RESOLVIDO',
+                              dataResolucao: d.dataResolucao || new Date().toISOString()
+                            }));
                             handleWorkflowAction('Liberado Operação', logMsg, {
+                              defeitos: defeitosAprovados,
                               dadosWorkflow: {
                                 ...(formData.dadosWorkflow || {}),
                                 solicitacaoLiberacao: {
@@ -13021,12 +13168,19 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
               onClick={() => {
                 const pendentes = (formData.defeitos || []).some(d => d.status !== 'RESOLVIDO');
                 if (pendentes) {
-                  alert('Ainda existem defeitos pendentes. Por favor, marque todos como RESOLVIDOS.');
-                  return;
+                  return showFeedbackLocal('warning', 'Defeitos Pendentes', 'Ainda existem defeitos pendentes. Por favor, marque todos como RESOLVIDOS antes de liberar.');
                 }
+                const defeitosResolvidos = (formData.defeitos || []).map(d => ({
+                  ...d,
+                  status: 'RESOLVIDO',
+                  dataResolucao: d.dataResolucao || new Date().toISOString()
+                }));
                 const action = subModalResolveDefeitos;
                 setSubModalResolveDefeitos(null);
-                handleWorkflowAction(action.novaEtapa, action.logDesc, action.extras);
+                handleWorkflowAction(action.novaEtapa, action.logDesc, {
+                  ...(action.extras || {}),
+                  defeitos: defeitosResolvidos
+                });
               }}
               disabled={(formData.defeitos || []).some(d => d.status !== 'RESOLVIDO')}
               className="flex-1 py-3.5 bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed rounded-2xl font-black text-sm transition-all active:scale-[0.98] shadow-md shadow-emerald-600/10"
@@ -13162,7 +13316,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                       key={def.id || idx}
                       onClick={() => {
                         setDefeitosParaDevolver(prev => prev.map(d => 
-                          (d.id === def.id) ? { ...d, status: d.status === 'RESOLVIDO' ? 'PENDENTE' : 'RESOLVIDO' } : d
+                          (String(d.id) === String(def.id)) ? { ...d, status: d.status === 'RESOLVIDO' ? 'PENDENTE' : 'RESOLVIDO' } : d
                         ));
                       }}
                       className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
@@ -13214,8 +13368,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
               type="button"
               onClick={() => {
                 if (!motivoDevolucaoOficina.trim()) {
-                  alert('Por favor, informe o motivo da devolução para o mecânico.');
-                  return;
+                  return showFeedbackLocal('warning', 'Motivo Obrigatório', 'Por favor, informe o motivo da devolução para o mecânico.');
                 }
                 const logDesc = `Frota (${currentUser?.nome || 'Usuário'}) rejeitou a solicitação de liberação e devolveu o veículo para a Oficina Interna. Motivo: ${motivoDevolucaoOficina.trim()}`;
                 
@@ -13393,6 +13546,88 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
         </div>
       </div>
     )}
+
+    {/* ★ MODAL ULTRA PREMIUM DE EVIDÊNCIAS FOTOGRÁFICAS OBRIGATÓRIAS */}
+    <ModalEvidenciasObrigatorias
+      isOpen={modalFotosObrigatoriasOpen}
+      onClose={() => setModalFotosObrigatoriasOpen(false)}
+      placa={formData.placa}
+      hodometro={formData.hodometro}
+      fotosChamado={formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}}
+      defeitos={formData.defeitos || []}
+      onUpdateFotoChamado={(key, dataUrl) => {
+        const newFotos = { ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}), [key]: dataUrl };
+        setFormData(prev => ({
+          ...prev,
+          fotosChamado: newFotos,
+          dadosWorkflow: {
+            ...(prev.dadosWorkflow || {}),
+            fotosChamado: newFotos
+          }
+        }));
+      }}
+      onUpdateFotoDefeito={(defeitoId, dataUrl) => {
+        updateDefeito(defeitoId, 'fotoDefeito', dataUrl);
+      }}
+      onConcluirChamado={() => {
+        setModalFotosObrigatoriasOpen(false);
+        const defeitosSanitizados = (formData.defeitos || []).map(d => ({
+          ...d,
+          numeroSolicitacao: (d.numeroSolicitacao || formData.numero || '').trim(),
+          categoria: (d.categoria || formData.defeitoPrincipal || 'Outros').trim()
+        }));
+
+        if (!isEditing) {
+          const openTicket = (rawChamados || []).find(c => (c.placa || '').trim().toUpperCase() === (formData.placa || '').trim().toUpperCase() && c.status !== 'RESOLVIDO');
+          if (openTicket) {
+            let legacyDefeitos = openTicket.defeitos;
+            if (!legacyDefeitos || legacyDefeitos.length === 0) {
+              if (openTicket.defeitoPrincipal || openTicket.defeitoEncontrado) {
+                legacyDefeitos = [{
+                  id: Date.now(),
+                  descricao: openTicket.defeitoEncontrado || 'Sem descrição',
+                  categoria: openTicket.defeitoPrincipal || 'Outros',
+                  isImpeditivo: true,
+                  status: 'PENDENTE',
+                  numeroSolicitacao: openTicket.numero || ''
+                }];
+              }
+            }
+            setDuplicidadeChamado({ ...openTicket, defeitos: legacyDefeitos || [] });
+            setModalDuplicidadeStep(1);
+            setEscalonamentoMotivo('');
+            setNovoDefeitoDescricao(defeitosSanitizados && defeitosSanitizados[0]?.descricao || '');
+            setNovoDefeitoCategoria(defeitosSanitizados && defeitosSanitizados[0]?.categoria || '');
+            setNovoDefeitoECar(defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao || '');
+            return;
+          }
+        }
+
+        const finalMotorista = formData.motorista === 'OUTRO' ? formData.motoristaOutro : formData.motorista;
+        const { motoristaOutro, fotosChamado, ...dadosSemCamposVirtuais } = formData;
+
+        const submitData = {
+          ...dadosSemCamposVirtuais, 
+          defeitos: defeitosSanitizados,
+          dadosWorkflow: {
+            ...(formData.dadosWorkflow || {}),
+            ...(fotosChamado ? { fotosChamado } : {})
+          },
+          motorista: finalMotorista,
+          status: 'ABERTO',
+          numero: (defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao) || formData.numero || '',
+          defeitoPrincipal: (defeitosSanitizados && defeitosSanitizados[0]?.categoria) || formData.defeitoPrincipal || '',
+          defeitoEncontrado: (defeitosSanitizados && defeitosSanitizados[0]?.descricao) || formData.defeitoEncontrado || ''
+        };
+        onSubmit(submitData);
+        if (!isEditing) {
+          const _id = Date.now();
+          setSuccessData({ codigoChamado: 'ALP.M-' + String(_id).slice(-6), placa: formData.placa, dataAbertura: formData.dataAbertura, defeitos: formData.defeitos || [] });
+          setShowSuccess(true);
+        }
+      }}
+      onPreviewImage={setSelectedImagePreview}
+    />
 
     {/* ★ MODAL ULTRA PREMIUM DE FEEDBACK & CONFIRMAÇÃO INTEGRADO AO MODAL DE CHAMADO */}
     <CustomFeedbackModal {...feedbackModalLocal} />
