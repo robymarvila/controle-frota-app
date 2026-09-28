@@ -2,8 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { 
   Search, Filter, Plus, X, AlertTriangle, Eye, Truck, Home, Wrench, 
   CheckCircle2, PlayCircle, Clock, ClipboardCheck, CalendarDays, Users, 
-  Boxes, ChevronRight, Briefcase, DollarSign, LayoutGrid, List, RefreshCcw, Building2, Check
+  Boxes, ChevronRight, Briefcase, DollarSign, LayoutGrid, List, RefreshCcw, Building2, Check, Droplets
 } from 'lucide-react';
+import ModalSeletorTipoChamado from './ModalSeletorTipoChamado';
+import ModalRegistroNivelOleo from './ModalRegistroNivelOleo';
+import NivelOleoView from './NivelOleoView';
 
 const calcularHorasParadas = (abertura, fechamento, hoje) => {
   const dataFechamento = fechamento ? new Date(fechamento) : (hoje ? new Date(hoje) : new Date());
@@ -33,10 +36,22 @@ const getEtapaWorkflow = (c) => {
   return stage;
 };
 
-export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLiberar, userPermissions, podeFinalizar, onNovoChamado }) {
+export default function ChamadosView({ 
+  chamados, 
+  vehicles, 
+  hoje, 
+  onEditar, 
+  onLiberar, 
+  userPermissions, 
+  podeFinalizar, 
+  onNovoChamado,
+  currentUser,
+  onSubmitChamado,
+  onPreviewImage
+}) {
   const vehiclesMap = useMemo(() => new Map((vehicles || []).map(v => [v.placa, v])), [vehicles]);
 
-  // View Mode: 'executive' (Hub de Cards) vs 'classic' (2 Blocos Verticais)
+  // View Mode: 'executive' (Hub de Cards) vs 'classic' (2 Blocos Verticais) vs 'oleo' (Nível de Óleo)
   const [viewMode, setViewMode] = useState(() => {
     try {
       return localStorage.getItem('fleet_chamados_view_mode') || 'executive';
@@ -44,6 +59,11 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
       return 'executive';
     }
   });
+
+  const [showSeletorModal, setShowSeletorModal] = useState(false);
+  const [showModalNivelOleo, setShowModalNivelOleo] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
+  const handlePreview = onPreviewImage || setPreviewImage;
 
   const handleSetViewMode = (mode) => {
     setViewMode(mode);
@@ -798,6 +818,18 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
                 <List size={14} className={viewMode === 'classic' ? 'text-blue-600' : ''} />
                 <span className="hidden sm:inline">Visão</span> Clássica
               </button>
+              <button
+                onClick={() => handleSetViewMode('oleo')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
+                  viewMode === 'oleo'
+                    ? 'bg-white text-blue-950 shadow-sm shadow-slate-200'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+                title="Aferições de Nível de Óleo do Motor"
+              >
+                <Droplets size={14} className={viewMode === 'oleo' ? 'text-amber-500' : ''} />
+                <span className="hidden sm:inline">Nível de</span> Óleo
+              </button>
             </div>
 
             {/* Filter Drawer Button */}
@@ -833,7 +865,7 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
             {/* + Novo Chamado Contextual Button */}
             {(userPermissions?.permissoes_edicao?.pode_abrir_chamado !== false) && onNovoChamado && (
               <button
-                onClick={onNovoChamado}
+                onClick={() => setShowSeletorModal(true)}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-2xl text-xs font-black transition-all shadow-md shadow-emerald-600/20 flex items-center gap-2 active:scale-95"
               >
                 <Plus size={16} />
@@ -1353,7 +1385,22 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
         </div>
       )}
 
-      {/* 4. MODAL DE FILTROS AVANÇADOS DE CHAMADOS */}
+      {/* 4. VISÃO NÍVEL DE ÓLEO DO MOTOR */}
+      {viewMode === 'oleo' && (
+        <NivelOleoView
+          chamados={chamados}
+          vehicles={vehicles}
+          hoje={hoje}
+          currentUser={currentUser}
+          userPermissions={userPermissions}
+          onEditar={onEditar}
+          onAbrirModalNovoOleo={() => setShowModalNivelOleo(true)}
+          onSubmitChamado={onSubmitChamado}
+          onPreviewImage={handlePreview}
+        />
+      )}
+
+      {/* 5. MODAL DE FILTROS AVANÇADOS DE CHAMADOS */}
       {showChamadosFiltersModal && (
         <div className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-dvh sm:max-h-[85vh] h-auto border border-slate-200">
@@ -1430,6 +1477,65 @@ export default function ChamadosView({ chamados, vehicles, hoje, onEditar, onLib
               >
                 Aplicar Filtros
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Seletor de Tipo de Chamado */}
+      <ModalSeletorTipoChamado
+        isOpen={showSeletorModal}
+        onClose={() => setShowSeletorModal(false)}
+        onSelectNovoChamado={() => {
+          setShowSeletorModal(false);
+          if (onNovoChamado) onNovoChamado();
+        }}
+        onSelectNivelOleo={() => {
+          setShowSeletorModal(false);
+          setShowModalNivelOleo(true);
+        }}
+      />
+
+      {/* Modal de Registro de Nível de Óleo */}
+      <ModalRegistroNivelOleo
+        isOpen={showModalNivelOleo}
+        onClose={() => setShowModalNivelOleo(false)}
+        vehicles={vehicles}
+        currentUser={currentUser}
+        onSuccess={() => {
+          if (viewMode !== 'oleo') {
+            handleSetViewMode('oleo');
+          }
+        }}
+        onPreviewImage={handlePreview}
+      />
+
+      {/* Visualizador de Imagem Ampliada */}
+      {previewImage && (
+        <div 
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div 
+            className="relative max-w-4xl max-h-[90vh] bg-slate-900 rounded-3xl p-3 border border-slate-700 shadow-2xl flex flex-col items-center overflow-hidden animate-in zoom-in-95"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 px-3 border-b border-slate-800">
+              <span className="text-xs font-black text-white">{previewImage.label || 'Evidência Fotográfica'}</span>
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-2 flex items-center justify-center overflow-auto max-h-[80vh]">
+              <img 
+                src={previewImage.url} 
+                alt={previewImage.label || 'Foto'} 
+                className="max-h-[75vh] w-auto object-contain rounded-2xl shadow-lg"
+              />
             </div>
           </div>
         </div>

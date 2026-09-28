@@ -17,7 +17,7 @@ import {
 
   ClipboardCheck, Sun, Moon, Home, ChevronDown
 
-, KeyRound, Loader, Shield, ShieldAlert, Globe, Zap, AlertOctagon, FileWarning, Info, FileSignature, Map as MapIcon, Camera, FileClock, Sparkles, Building2, Mail, Image as ImageIcon } from 'lucide-react';
+, KeyRound, Loader, Shield, ShieldAlert, Globe, Zap, AlertOctagon, FileWarning, Info, FileSignature, Map as MapIcon, Camera, FileClock, Sparkles, Building2, Mail, Image as ImageIcon, Droplets, Gauge, ExternalLink } from 'lucide-react';
 
 import forcaData from './forcaData.json';
 
@@ -1787,6 +1787,7 @@ export default function App() {
           delete payload.fotosChamado;
         }
         delete payload.motoristaOutro;
+        delete payload.forcarNovoChamadoSeparado;
       }
 
       if (table === 'colaboradores' || table === 'base_unificada') {
@@ -2736,9 +2737,9 @@ export default function App() {
       chamadosAtuais = chamadosAtuais.map(c => c.id === dadosChamado.id ? chamadoFinal : c);
     } else {
       // Criação
-      // Trava de integridade dupla: se já existir chamado ativo com status !== 'RESOLVIDO' para esta placa, anexa os defeitos ao invés de duplicar
+      // Trava de integridade dupla: se já existir chamado ativo com status !== 'RESOLVIDO' para esta placa, anexa os defeitos ao invés de duplicar (a menos que explicitamente solicitado novo separado)
       const chamadoAbertoExistente = chamadosAtuais.find(c => (c.placa || '').trim().toUpperCase() === (dadosChamado.placa || '').trim().toUpperCase() && c.status !== 'RESOLVIDO');
-      if (chamadoAbertoExistente) {
+      if (chamadoAbertoExistente && !dadosChamado.forcarNovoChamadoSeparado) {
         console.warn(`[Integridade Frota] Tentativa de abertura duplicada bloqueada para ${dadosChamado.placa}. Anexando defeito ao chamado ${chamadoAbertoExistente.id}`);
         const novosDefs = (dadosChamado.defeitos || []).map(d => ({ ...d, id: d.id || (Date.now() + Math.random()) }));
         const defeitosUnificados = [...(chamadoAbertoExistente.defeitos || []), ...novosDefs];
@@ -2767,7 +2768,7 @@ export default function App() {
         chamadosAtuais = chamadosAtuais.map(c => c.id === chamadoAbertoExistente.id ? updatedExistente : c);
         setRawChamados(chamadosAtuais);
         syncToSupabase('chamados', updatedExistente);
-        return;
+        return updatedExistente;
       }
 
       const vCreate = rawVehicles.find(vec => vec.placa === dadosChamado.placa);
@@ -2777,10 +2778,12 @@ export default function App() {
       const usuarioLog = currentUser?.nome || 'Sistema';
       const logAbertura = `Chamado E-CAR aberto por ${usuarioLog} (${_codigoChamado}). Placa: ${dadosChamado.placa} | Situação: ${dadosChamado.situacaoVeiculo} | KM: ${dadosChamado.hodometro ? Number(dadosChamado.hodometro).toLocaleString('pt-BR') : '(Não informado)'} | Etapa inicial: Análise Frota.`;
 
+      const { forcarNovoChamadoSeparado, ...dadosChamadoLimpos } = dadosChamado;
+
       chamadoFinal = { 
-        ...dadosChamado, 
-        id: _chamadoId, 
-        codigoChamado: _codigoChamado, 
+        ...dadosChamadoLimpos, 
+        id: dadosChamado.id || _chamadoId, 
+        codigoChamado: dadosChamado.codigoChamado || _codigoChamado, 
         status: 'ABERTO', 
         dataHoraFechamento: null, 
         pendencia: '', 
@@ -2839,6 +2842,8 @@ export default function App() {
     if (!dadosChamado.silentSave) {
       setIsNovoChamadoModalOpen(false); setChamadoEmEdicao(null);
     }
+
+    return chamadoFinal;
   };
 
   const handleLiberarVeiculo = async (dadosLiberacao) => {
@@ -3215,7 +3220,7 @@ export default function App() {
         {(activeTab === 'inicio' || activeTab === 'home' || activeTab === 'boas_vindas') && <InicioView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} setActiveTab={setActiveTab} setChamadoEmEdicao={setChamadoEmEdicao} theme={theme} isWelcomeModalOpen={isWelcomeModalOpen} userPermissions={userPermissions} />}
         {activeTab === 'calendario' && <CalendarioOperacionalView currentUser={currentUser} activeRegional={activeRegional} />}
         {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
-        {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} />}
+        {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />}
         {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
         {activeTab === 'frota' && <FrotaView vehicles={vehicles} laudosGeral={laudosGeral} onSelectVehicle={(v) => { setSelectedVehicle(v); setActiveTab('detalhes_veiculo'); }} userPermissions={userPermissions} />}
         {activeTab === 'ociosidade_frota' && <OciosidadeView vehicles={vehicles} chamados={chamados} hoje={hoje} />}
@@ -3238,6 +3243,7 @@ export default function App() {
             onVoltar={() => { setSelectedVehicle(null); setActiveTab('frota'); }}
             onUpdate={handleUpdateVeiculo}
             onDelete={handleDeleteVeiculo}
+            onEditarChamado={setChamadoEmEdicao}
           />
         )}
         {activeTab === 'detalhes_colaborador' && selectedColaborador && (
@@ -3543,7 +3549,7 @@ export default function App() {
 
           {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
 
-          {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} />}
+          {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />}
 
           {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
 
@@ -3591,6 +3597,8 @@ export default function App() {
               onUpdate={handleUpdateVeiculo}
 
               onDelete={handleDeleteVeiculo}
+
+              onEditarChamado={setChamadoEmEdicao}
 
             />
 
@@ -8207,7 +8215,7 @@ function FrotaView({ vehicles, onSelectVehicle, userPermissions, laudosGeral }) 
 
 
 
-function DetalhesVeiculoView({ veiculo, chamados, rawChamados, colaboradores, hoje, currentUser, onVoltar, onUpdate, onDelete, laudosGeral, setLaudosGeral, userPermissions }) {
+function DetalhesVeiculoView({ veiculo, chamados, rawChamados, colaboradores, hoje, currentUser, onVoltar, onUpdate, onDelete, laudosGeral, setLaudosGeral, userPermissions, onEditarChamado }) {
 
   const [activeTab, setActiveTab] = useState('dados');
 
@@ -8216,6 +8224,36 @@ function DetalhesVeiculoView({ veiculo, chamados, rawChamados, colaboradores, ho
   const [isEditing, setIsEditing] = useState(false);
 
   const [isModalEquipeOpen, setIsModalEquipeOpen] = useState(false);
+
+  // Histórico de Aferições de Óleo do Veículo
+  const [registrosOleoVeiculo, setRegistrosOleoVeiculo] = useState([]);
+  const [loadingOleoVeiculo, setLoadingOleoVeiculo] = useState(false);
+  const [previewFotoOleo, setPreviewFotoOleo] = useState(null);
+
+  const carregarRegistrosOleoVeiculo = useCallback(async () => {
+    if (!veiculo?.placa) return;
+    try {
+      setLoadingOleoVeiculo(true);
+      const { data, error } = await supabase
+        .from('registros_nivel_oleo')
+        .select('*')
+        .eq('placa', veiculo.placa.trim().toUpperCase())
+        .order('data_registro', { ascending: false });
+      if (!error && data) {
+        setRegistrosOleoVeiculo(data);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar aferições de óleo do veículo:', err);
+    } finally {
+      setLoadingOleoVeiculo(false);
+    }
+  }, [veiculo?.placa]);
+
+  useEffect(() => {
+    if (activeTab === 'nivel_oleo') {
+      carregarRegistrosOleoVeiculo();
+    }
+  }, [activeTab, carregarRegistrosOleoVeiculo]);
 
   const isGerente = ['GERENTE', 'COORDENADOR', 'ADMINISTRADOR'].includes(currentUser?.perfil?.toUpperCase());
   const temPermissaoEspecial = userPermissions?.permissoes_edicao?.pode_adicionar_laudo === true;
@@ -8541,6 +8579,8 @@ return (
 
         <button onClick={() => setActiveTab('historico_chamados')} className={`px-8 py-3 rounded-full text-sm font-bold transition-all shrink-0 flex items-center gap-2 ${activeTab === 'historico_chamados' ? 'bg-rose-600 shadow-md text-white' : 'text-slate-500 hover:text-blue-950'}`}><History size={18} /> Histórico de Chamados</button>
 
+        <button onClick={() => setActiveTab('nivel_oleo')} className={`px-8 py-3 rounded-full text-sm font-bold transition-all shrink-0 flex items-center gap-2 ${activeTab === 'nivel_oleo' ? 'bg-amber-600 shadow-md text-white' : 'text-slate-500 hover:text-blue-950'}`}><Droplets size={18} /> Nível de Óleo</button>
+
       </div>
 
 
@@ -8601,6 +8641,243 @@ return (
                 </tbody>
               </table>
             </div>
+          </div>
+        );
+      })()}
+
+      {activeTab === 'nivel_oleo' && (() => {
+        const stats = {
+          total: registrosOleoVeiculo.length,
+          normal: registrosOleoVeiculo.filter(r => r.nivel_oleo === 1).length,
+          baixo: registrosOleoVeiculo.filter(r => r.nivel_oleo === 2).length,
+          semOleo: registrosOleoVeiculo.filter(r => r.nivel_oleo === 3).length,
+        };
+
+        return (
+          <div className="bg-white rounded-[2rem] p-6 sm:p-8 shadow-sm border border-emerald-50 min-h-[400px] animate-in fade-in duration-200 space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-6">
+              <div>
+                <h3 className="text-2xl font-black text-blue-950 flex items-center gap-2.5">
+                  <Droplets size={24} className="text-amber-500" />
+                  Histórico de Nível de Óleo do Motor
+                </h3>
+                <p className="text-xs text-slate-400 font-medium mt-1">
+                  Registros preventivos da vareta de óleo e evidências fotográficas de {veiculo.placa}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="bg-amber-100 text-amber-800 px-4 py-1.5 rounded-full font-bold text-sm">
+                  {stats.total} {stats.total === 1 ? 'Aferição' : 'Aferições'}
+                </span>
+                <button
+                  type="button"
+                  onClick={carregarRegistrosOleoVeiculo}
+                  disabled={loadingOleoVeiculo}
+                  className="p-2 rounded-full text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                  title="Atualizar lista de aferições"
+                >
+                  <RefreshCcw size={18} className={loadingOleoVeiculo ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </div>
+
+            {/* Mini KPIs */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/60">
+                <span className="text-[10px] font-black uppercase text-slate-400">Total</span>
+                <p className="text-xl font-black text-slate-800 mt-1">{stats.total}</p>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200/60 text-emerald-800">
+                <span className="text-[10px] font-black uppercase text-emerald-600">Normais</span>
+                <p className="text-xl font-black text-emerald-900 mt-1">{stats.normal}</p>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200/60 text-amber-800">
+                <span className="text-[10px] font-black uppercase text-amber-600">Baixos</span>
+                <p className="text-xl font-black text-amber-900 mt-1">{stats.baixo}</p>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200/60 text-rose-800">
+                <span className="text-[10px] font-black uppercase text-rose-600">Sem Óleo</span>
+                <p className="text-xl font-black text-rose-900 mt-1">{stats.semOleo}</p>
+              </div>
+            </div>
+
+            {/* Listagem */}
+            {registrosOleoVeiculo.length === 0 ? (
+              <div className="py-16 text-center">
+                <div className="w-16 h-16 rounded-full bg-amber-50 text-amber-500 mx-auto flex items-center justify-center mb-3">
+                  <Droplets size={32} />
+                </div>
+                <h4 className="text-base font-black text-slate-700">Nenhuma aferição registrada</h4>
+                <p className="text-xs text-slate-400 font-medium max-w-sm mx-auto mt-1">
+                  Quando os operadores registrarem o nível de óleo da placa {veiculo.placa} com fotos da vareta e hodômetro, os registros aparecerão aqui em ordem cronológica.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left whitespace-nowrap">
+                  <thead>
+                    <tr className="text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                      <th className="py-4 px-4">Data / Hora</th>
+                      <th className="py-4 px-4">Nível Aferido</th>
+                      <th className="py-4 px-4">Hodômetro</th>
+                      <th className="py-4 px-4 text-center">Evidências (Fotos)</th>
+                      <th className="py-4 px-4">Aferido Por</th>
+                      <th className="py-4 px-4 text-center">Chamado / Workflow</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {registrosOleoVeiculo.map((reg) => {
+                      const dataFmt = new Date(reg.data_registro).toLocaleString('pt-BR', {
+                        day: '2-digit', month: '2-digit', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit'
+                      });
+                      const isNivel3 = reg.nivel_oleo === 3;
+                      const isNivel2 = reg.nivel_oleo === 2;
+
+                      const chVinculado = (rawChamados || chamados || []).find(c =>
+                        (reg.chamado_id && (c.id === reg.chamado_id || String(c.id) === String(reg.chamado_id))) ||
+                        (reg.chamado_codigo && (c.codigoChamado === reg.chamado_codigo || c.numero === reg.chamado_codigo)) ||
+                        (c.dadosWorkflow?.origemRegistroOleo === reg.codigo_registro)
+                      );
+
+                      return (
+                        <tr key={reg.id || reg.codigo_registro} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-4 px-4">
+                            <span className="block text-sm font-bold text-slate-700">{dataFmt}</span>
+                            <span className="block text-[10px] font-mono font-bold text-slate-400">{reg.codigo_registro}</span>
+                          </td>
+
+                          <td className="py-4 px-4">
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase ${
+                              isNivel3 
+                                ? 'bg-rose-100 text-rose-700 border border-rose-200' 
+                                : isNivel2 
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                                  : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            }`}>
+                              <span className="w-2 h-2 rounded-full bg-current" />
+                              {reg.nivel_oleo_rotulo || (isNivel3 ? 'Sem Óleo' : isNivel2 ? 'Baixo' : 'Normal')}
+                            </span>
+                          </td>
+
+                          <td className="py-4 px-4">
+                            <span className="text-sm font-black text-slate-800 flex items-center gap-1">
+                              <Gauge size={14} className="text-blue-500" />
+                              {reg.hodometro ? Number(reg.hodometro).toLocaleString('pt-BR') : '---'} km
+                            </span>
+                          </td>
+
+                          <td className="py-4 px-4">
+                            <div className="flex items-center justify-center gap-2">
+                              {reg.foto_frente_url && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewFotoOleo({ url: reg.foto_frente_url, label: `Frente do Veículo - ${veiculo.placa}` })}
+                                  className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200 hover:border-blue-400 hover:scale-105 transition-all shadow-xs shrink-0 group relative"
+                                  title="Foto da Frente"
+                                >
+                                  <img src={reg.foto_frente_url} alt="Frente" className="w-full h-full object-cover" />
+                                </button>
+                              )}
+                              {reg.foto_hodometro_url && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewFotoOleo({ url: reg.foto_hodometro_url, label: `Hodômetro (${reg.hodometro} km) - ${veiculo.placa}` })}
+                                  className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200 hover:border-blue-400 hover:scale-105 transition-all shadow-xs shrink-0 group relative"
+                                  title="Foto do Hodômetro"
+                                >
+                                  <img src={reg.foto_hodometro_url} alt="Hodômetro" className="w-full h-full object-cover" />
+                                </button>
+                              )}
+                              {reg.foto_haste_url && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewFotoOleo({ url: reg.foto_haste_url, label: `Vareta de Óleo (${reg.nivel_oleo_rotulo}) - ${veiculo.placa}` })}
+                                  className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200 hover:border-amber-400 hover:scale-105 transition-all shadow-xs shrink-0 group relative"
+                                  title="Foto da Vareta de Óleo"
+                                >
+                                  <img src={reg.foto_haste_url} alt="Vareta" className="w-full h-full object-cover" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className="py-4 px-4">
+                            <span className="text-xs font-bold text-slate-600 block">{reg.criado_por || 'Sistema'}</span>
+                            {reg.observacoes && (
+                              <span className="text-[11px] text-slate-400 italic truncate max-w-[200px] block" title={reg.observacoes}>
+                                {reg.observacoes}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-4 px-4 text-center">
+                            {reg.status === 'CHAMADO_ABERTO' || chVinculado ? (
+                              <div className="flex flex-col sm:flex-row items-center justify-center gap-1.5">
+                                <span className="px-2.5 py-1 rounded-xl bg-slate-900 text-white text-[11px] font-black font-mono shadow-xs">
+                                  #{reg.chamado_codigo || chVinculado?.codigoChamado || 'OS'}
+                                </span>
+                                {chVinculado?.etapaWorkflow && (
+                                  <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-black">
+                                    {chVinculado.etapaWorkflow}
+                                  </span>
+                                )}
+                                {onEditarChamado && chVinculado && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onEditarChamado(chVinculado)}
+                                    className="p-1 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                                    title="Abrir detalhes deste chamado"
+                                  >
+                                    <ExternalLink size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs font-medium text-slate-400">
+                                Sem pendência
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Modal de Zoom de Foto */}
+            {previewFotoOleo && (
+              <div 
+                className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in"
+                onClick={() => setPreviewFotoOleo(null)}
+              >
+                <div 
+                  className="relative max-w-4xl max-h-[90vh] bg-slate-900 rounded-3xl p-3 border border-slate-700 shadow-2xl flex flex-col items-center overflow-hidden animate-in zoom-in-95"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="w-full flex justify-between items-center px-3 py-2 text-white border-b border-slate-800">
+                    <span className="text-sm font-bold truncate">{previewFotoOleo.label || 'Foto da Aferição'}</span>
+                    <button 
+                      type="button"
+                      onClick={() => setPreviewFotoOleo(null)}
+                      className="p-1.5 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="p-2 flex items-center justify-center max-h-[75vh] overflow-hidden">
+                    <img 
+                      src={previewFotoOleo.url} 
+                      alt="Ampliação" 
+                      className="max-h-[72vh] max-w-full rounded-2xl object-contain shadow-lg"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
@@ -10684,11 +10961,14 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
           }
 
           const rawDefs = cData.defeitos || prev.defeitos || [];
-          const normalizedDefs = (Array.isArray(rawDefs) ? rawDefs : []).map(d => ({
-            ...d,
-            categoria: d.categoria || cData.defeitoPrincipal || prev.defeitoPrincipal || 'Outros',
-            numeroSolicitacao: d.numeroSolicitacao || cData.numero || prev.numero || ''
-          }));
+          const normalizedDefs = (Array.isArray(rawDefs) ? rawDefs : []).map(d => {
+            const rawCat = d.categoria || cData.defeitoPrincipal || prev.defeitoPrincipal || 'Outros';
+            return {
+              ...d,
+              categoria: rawCat === 'Mecanico' ? 'Mecânico' : rawCat,
+              numeroSolicitacao: d.numeroSolicitacao || cData.numero || prev.numero || ''
+            };
+          });
 
           setFormData(prev => ({
             ...prev,
@@ -10708,17 +10988,20 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   const [formData, setFormData] = useState(() => {
 
     if (chamadoEdicao) {
-      let legacyDefeitos = (chamadoEdicao.defeitos || []).map(d => ({
-        ...d,
-        categoria: d.categoria || chamadoEdicao.defeitoPrincipal || 'Outros',
-        numeroSolicitacao: d.numeroSolicitacao || chamadoEdicao.numero || ''
-      }));
+      let legacyDefeitos = (chamadoEdicao.defeitos || []).map(d => {
+        const rawCat = d.categoria || chamadoEdicao.defeitoPrincipal || 'Outros';
+        return {
+          ...d,
+          categoria: rawCat === 'Mecanico' ? 'Mecânico' : rawCat,
+          numeroSolicitacao: d.numeroSolicitacao || chamadoEdicao.numero || ''
+        };
+      });
       if (!legacyDefeitos || legacyDefeitos.length === 0) {
         if (chamadoEdicao.defeitoPrincipal || chamadoEdicao.defeitoEncontrado) {
           legacyDefeitos = [{
             id: Date.now(),
             descricao: chamadoEdicao.defeitoEncontrado || 'Sem descrição',
-            categoria: chamadoEdicao.defeitoPrincipal || 'Outros',
+            categoria: (chamadoEdicao.defeitoPrincipal === 'Mecanico' ? 'Mecânico' : chamadoEdicao.defeitoPrincipal) || 'Outros',
             isImpeditivo: true,
             status: 'PENDENTE',
             numeroSolicitacao: chamadoEdicao.numero || ''
@@ -11918,7 +12201,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                         <select 
                           required
                           disabled={isFrota && isEditing && !!defeito.categoria}
-                          value={defeito.categoria || ''} 
+                          value={defeito.categoria === 'Mecanico' ? 'Mecânico' : (defeito.categoria || '')} 
                           onChange={e => updateDefeito(defeito.id, 'categoria', e.target.value)} 
                           className="w-full p-2.5 bg-white rounded-lg font-bold text-xs text-slate-700 outline-none border border-slate-200 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                         >
