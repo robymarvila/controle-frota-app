@@ -8,17 +8,31 @@ import ModalSeletorTipoChamado from './ModalSeletorTipoChamado';
 import ModalRegistroNivelOleo from './ModalRegistroNivelOleo';
 import NivelOleoView from './NivelOleoView';
 
+const parseDateSafe = (d) => {
+  if (!d) return null;
+  if (d instanceof Date) return isNaN(d.getTime()) ? null : d;
+  if (typeof d === 'number') {
+    const fromNum = new Date(d);
+    return isNaN(fromNum.getTime()) ? null : fromNum;
+  }
+  const str = String(d).trim().replace(' ', 'T');
+  const parsed = new Date(str);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
+
 const calcularHorasParadas = (abertura, fechamento, hoje) => {
-  const dataFechamento = fechamento ? new Date(fechamento) : (hoje ? new Date(hoje) : new Date());
-  const diffMs = dataFechamento - new Date(abertura);
+  const dataFechamento = parseDateSafe(fechamento) || parseDateSafe(hoje) || new Date();
+  const dataAbertura = parseDateSafe(abertura);
+  if (!dataAbertura) return 0;
+  const diffMs = dataFechamento.getTime() - dataAbertura.getTime();
   const horas = diffMs / (1000 * 60 * 60);
   return horas > 0 ? horas : 0;
 };
 
 const formatarDataBR = (dataString) => {
   if (!dataString) return '--';
-  const data = new Date(dataString);
-  if (isNaN(data.getTime())) return String(dataString);
+  const data = parseDateSafe(dataString);
+  if (!data) return String(dataString);
   const dia = String(data.getDate()).padStart(2, '0');
   const mes = String(data.getMonth() + 1).padStart(2, '0');
   const ano = data.getFullYear();
@@ -269,7 +283,7 @@ export default function ChamadosView({
   const oficinasExternasDistrib = useMemo(() => {
     const map = new Map();
     chamadosOficinaExternaBase.forEach(c => {
-      const ofName = (c.oficinaDestino || c.dadosWorkflow?.oficinaDestino || 'Oficina Credenciada').trim();
+      const ofName = String(c.oficinaDestino || c.dadosWorkflow?.oficinaDestino || 'Oficina Credenciada').trim();
       map.set(ofName, (map.get(ofName) || 0) + 1);
     });
     return Array.from(map.entries()).map(([nome, count]) => ({ nome, count })).sort((a, b) => b.count - a.count);
@@ -319,7 +333,7 @@ export default function ChamadosView({
       if (executiveFilters.tipoOficina === 'INTERNA' && !isChamadoOficinaInterna(c)) return false;
 
       if (executiveFilters.oficinaNome) {
-        const ofName = (c.oficinaDestino || c.dadosWorkflow?.oficinaDestino || 'Oficina Credenciada').trim();
+        const ofName = String(c.oficinaDestino || c.dadosWorkflow?.oficinaDestino || 'Oficina Credenciada').trim();
         if (ofName !== executiveFilters.oficinaNome) return false;
       }
 
@@ -449,8 +463,10 @@ export default function ChamadosView({
               }
             }
             if (t) {
-              const dateObj = new Date(t);
-              return `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')} ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
+              const dateObj = parseDateSafe(t);
+              if (dateObj) {
+                return `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')} ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
+              }
             }
             return null;
           };
@@ -494,7 +510,7 @@ export default function ChamadosView({
                   )}
                   <span className="flex items-center gap-1.5 text-slate-600 font-bold">
                     <Users size={13} className="text-slate-400" />
-                    {equipeCod} {c.motorista ? `(${c.motorista.split(' ')[0]})` : ''}
+                    {equipeCod} {c.motorista ? `(${String(c.motorista).split(' ')[0]})` : ''}
                   </span>
                   <span className="text-[11px] text-rose-500 font-black flex items-center gap-1 mt-0.5">
                     <Clock size={12} className="text-rose-500" />

@@ -6,6 +6,7 @@ import {
 import { capturePhotoUnified } from '../utils/photoCapture';
 import { supabase } from '../supabaseClient';
 import GuiaMedicaoVaretaOleo from './GuiaMedicaoVaretaOleo';
+import SearchableSelect from './SearchableSelect';
 
 export default function ModalRegistroNivelOleo({
   isOpen,
@@ -16,7 +17,6 @@ export default function ModalRegistroNivelOleo({
   onPreviewImage
 }) {
   const [placa, setPlaca] = useState('');
-  const [searchPlaca, setSearchPlaca] = useState('');
   const [nivelOleo, setNivelOleo] = useState(null); // 1 | 2 | 3
   const [hodometro, setHodometro] = useState('');
   const [observacoes, setObservacoes] = useState('');
@@ -33,24 +33,33 @@ export default function ModalRegistroNivelOleo({
   const [erroMsg, setErroMsg] = useState('');
   const [showGuiaModal, setShowGuiaModal] = useState(false);
 
+  // Opções para o SearchableSelect com marca, modelo e regional
+  const vehicleOptions = useMemo(() => {
+    return (vehicles || []).map(v => ({
+      value: v.placa,
+      label: v.placa,
+      subLabel: `${v.marca || ''} ${v.modelo || v.subTipo || ''} • ${v.regional || 'Norte'}`.trim()
+    }));
+  }, [vehicles]);
+
   // Veículo selecionado
   const selectedVehicle = useMemo(() => {
     if (!placa) return null;
-    return (vehicles || []).find(v => (v.placa || '').toUpperCase() === placa.toUpperCase()) || null;
+    return (vehicles || []).find(v => (v.placa || '').toUpperCase() === String(placa).toUpperCase()) || null;
   }, [placa, vehicles]);
 
-  // Filtragem da lista suspensa de veículos
-  const filteredVehicles = useMemo(() => {
-    const list = vehicles || [];
-    if (!searchPlaca.trim()) return list.slice(0, 50);
-    const q = searchPlaca.trim().toUpperCase();
-    return list.filter(v => 
-      (v.placa || '').toUpperCase().includes(q) || 
-      (v.marca || '').toUpperCase().includes(q) ||
-      (v.modelo || '').toUpperCase().includes(q) ||
-      (v.regional || '').toUpperCase().includes(q)
-    ).slice(0, 50);
-  }, [vehicles, searchPlaca]);
+  // Manipulador de seleção de placa (auto-preenche hodômetro se vazio)
+  const handlePlacaChange = (newPlaca) => {
+    setPlaca(newPlaca);
+    if (newPlaca) {
+      const v = (vehicles || []).find(item => (item.placa || '').toUpperCase() === String(newPlaca).toUpperCase());
+      if (v && (v.km_atual || v.hodometro)) {
+        if (!hodometro) {
+          setHodometro(String(v.km_atual || v.hodometro));
+        }
+      }
+    }
+  };
 
   // Último KM conhecido do veículo
   const ultimoKmRegistrado = useMemo(() => {
@@ -62,7 +71,7 @@ export default function ModalRegistroNivelOleo({
   // Alerta não impeditivo de KM inferior
   const isKmMenorQueAnterior = useMemo(() => {
     if (!ultimoKmRegistrado || !hodometro) return false;
-    const kmNum = Number(hodometro.replace(/\D/g, ''));
+    const kmNum = Number(String(hodometro).replace(/\D/g, ''));
     return kmNum > 0 && kmNum < ultimoKmRegistrado;
   }, [ultimoKmRegistrado, hodometro]);
 
@@ -264,28 +273,13 @@ export default function ModalRegistroNivelOleo({
               </label>
 
               <div className="relative">
-                <select
+                <SearchableSelect
+                  options={vehicleOptions}
                   value={placa}
-                  onChange={(e) => {
-                    setPlaca(e.target.value);
-                    const v = (vehicles || []).find(item => item.placa === e.target.value);
-                    if (v && (v.km_atual || v.hodometro)) {
-                      // Se hodômetro ainda estiver vazio, sugere o atual
-                      if (!hodometro) {
-                        setHodometro(String(v.km_atual || v.hodometro));
-                      }
-                    }
-                  }}
+                  onChange={handlePlacaChange}
+                  placeholder="Digite parte da placa (ex: RCW, SKJ, 123)..."
                   className="w-full bg-slate-50 dark:bg-slate-800/80 border-2 border-slate-200 dark:border-slate-700 focus:border-emerald-500 dark:focus:border-emerald-500 rounded-2xl px-4 py-3 text-sm font-black text-slate-800 dark:text-white transition-all outline-none"
-                  required
-                >
-                  <option value="">-- Selecione uma Placa da Frota --</option>
-                  {(vehicles || []).map((v) => (
-                    <option key={v.placa} value={v.placa}>
-                      {v.placa} - {v.marca || ''} {v.modelo || v.subTipo || ''} [{v.regional || 'Regional'}]
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
             </div>
 

@@ -9,6 +9,15 @@ import { useState, useEffect } from 'react';
  * - Tablet: 769px – 1024px
  * - Desktop: > 1024px
  */
+
+const checkIsPWA = () => {
+  if (typeof window === 'undefined') return false;
+  return Boolean(
+    window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    window.navigator?.standalone === true
+  );
+};
+
 export function useDeviceDetect() {
   const [device, setDevice] = useState(() => {
     if (typeof window === 'undefined') {
@@ -19,7 +28,7 @@ export function useDeviceDetect() {
       isMobile: w <= 768,
       isTablet: w > 768 && w <= 1024,
       isDesktop: w > 1024,
-      isPWA: window.matchMedia('(display-mode: standalone)').matches,
+      isPWA: checkIsPWA(),
     };
   });
 
@@ -30,7 +39,7 @@ export function useDeviceDetect() {
         isMobile: w <= 768,
         isTablet: w > 768 && w <= 1024,
         isDesktop: w > 1024,
-        isPWA: window.matchMedia('(display-mode: standalone)').matches,
+        isPWA: checkIsPWA(),
       });
     };
 
@@ -38,13 +47,13 @@ export function useDeviceDetect() {
     window.addEventListener('orientationchange', check);
     
     // Also listen for display-mode changes
-    const mqStandalone = window.matchMedia('(display-mode: standalone)');
-    mqStandalone.addEventListener?.('change', check);
+    const mqStandalone = window.matchMedia?.('(display-mode: standalone)');
+    mqStandalone?.addEventListener?.('change', check);
 
     return () => {
       window.removeEventListener('resize', check);
       window.removeEventListener('orientationchange', check);
-      mqStandalone.removeEventListener?.('change', check);
+      mqStandalone?.removeEventListener?.('change', check);
     };
   }, []);
 

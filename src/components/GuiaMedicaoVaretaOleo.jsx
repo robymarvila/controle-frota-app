@@ -322,32 +322,38 @@ function VaretaSvg({ nivel = 'ideal', tipo = 'completo' }) {
   // Altura total da ponta hachurada no SVG: y=130 a y=200 (70px)
   let oilFillHeight = 65; // 'cheio' / 'ideal'
   let oilFillY = 135;
-  let oilColor = '#f59e0b';
   let oilGradientId = 'oilGradIdeal';
 
   if (nivel === 'baixo') {
     oilFillHeight = 15;
     oilFillY = 185;
-    oilColor = '#d97706';
     oilGradientId = 'oilGradLow';
   } else if (nivel === 'cheio' && tipo === 'falso') {
     oilFillHeight = 65;
     oilFillY = 135;
-    oilColor = '#f59e0b';
     oilGradientId = 'oilGradFalse';
   }
+
+  // Identificador exclusivo para isolar elementos no DOM do iOS WebKit
+  const uid = `v_${nivel}_${tipo}`;
+  const clipId = `${uid}_clip`;
+  const capId = `${uid}_cap`;
+  const stemId = `${uid}_stem`;
+  const bladeId = `${uid}_blade`;
+  const patternId = `${uid}_hatch`;
+  const oilId = `${uid}_oil`;
 
   return (
     <svg width="120" height="240" viewBox="0 0 120 240" fill="none" xmlns="http://www.w3.org/2000/svg" className="drop-shadow-md">
       <defs>
         {/* Padrão Hachurado (Crosshatch Pattern) da Vareta */}
-        <pattern id="crosshatch" width="6" height="6" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+        <pattern id={patternId} width="6" height="6" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
           <line x1="0" y1="0" x2="0" y2="6" stroke="#475569" strokeWidth="0.8" opacity="0.45" />
           <line x1="0" y1="0" x2="6" y2="0" stroke="#475569" strokeWidth="0.8" opacity="0.45" />
         </pattern>
 
         {/* Gradiente Metálico da Tampa */}
-        <linearGradient id="capMetalGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <linearGradient id={capId} x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" stopColor="#1e293b" />
           <stop offset="35%" stopColor="#475569" />
           <stop offset="70%" stopColor="#1e293b" />
@@ -355,7 +361,7 @@ function VaretaSvg({ nivel = 'ideal', tipo = 'completo' }) {
         </linearGradient>
 
         {/* Gradiente da Haste de Aço */}
-        <linearGradient id="stemMetalGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <linearGradient id={stemId} x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" stopColor="#94a3b8" />
           <stop offset="45%" stopColor="#f1f5f9" />
           <stop offset="75%" stopColor="#94a3b8" />
@@ -363,7 +369,7 @@ function VaretaSvg({ nivel = 'ideal', tipo = 'completo' }) {
         </linearGradient>
 
         {/* Gradiente Dourado do Óleo */}
-        <linearGradient id={oilGradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+        <linearGradient id={oilId} x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" stopColor="#b45309" />
           <stop offset="40%" stopColor="#fbbf24" />
           <stop offset="70%" stopColor="#f59e0b" />
@@ -371,16 +377,21 @@ function VaretaSvg({ nivel = 'ideal', tipo = 'completo' }) {
         </linearGradient>
 
         {/* Sombra de corte da ponta */}
-        <linearGradient id="bladeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <linearGradient id={bladeId} x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" stopColor="#cbd5e1" />
           <stop offset="50%" stopColor="#f8fafc" />
           <stop offset="100%" stopColor="#94a3b8" />
         </linearGradient>
+
+        {/* ClipPath isolado dentro do defs para conformidade estrita */}
+        <clipPath id={clipId}>
+          <path d="M 53 133 L 67 133 L 67 199 C 67 202, 53 202, 53 199 Z" />
+        </clipPath>
       </defs>
 
       {/* 1. TAMPA SUPERIOR DO PLUG / BUJÃO */}
-      <rect x="36" y="8" width="48" height="20" rx="3" fill="url(#capMetalGrad)" stroke="#0f172a" strokeWidth="1.5" />
-      <rect x="28" y="28" width="64" height="14" rx="2" fill="url(#capMetalGrad)" stroke="#0f172a" strokeWidth="1.5" />
+      <rect x="36" y="8" width="48" height="20" rx="3" fill={`url(#${capId})`} stroke="#0f172a" strokeWidth="1.5" />
+      <rect x="28" y="28" width="64" height="14" rx="2" fill={`url(#${capId})`} stroke="#0f172a" strokeWidth="1.5" />
       
       {/* Roscas do bujão */}
       <rect x="34" y="42" width="52" height="16" rx="2" fill="#334155" stroke="#0f172a" strokeWidth="1" />
@@ -388,7 +399,7 @@ function VaretaSvg({ nivel = 'ideal', tipo = 'completo' }) {
       <line x1="34" y1="52" x2="86" y2="54" stroke="#cbd5e1" strokeWidth="2" strokeLinecap="round" />
 
       {/* 2. HASTE DE AÇO PRINCIPAL */}
-      <rect x="56" y="58" width="8" height="74" fill="url(#stemMetalGrad)" stroke="#475569" strokeWidth="1" />
+      <rect x="56" y="58" width="8" height="74" fill={`url(#${stemId})`} stroke="#475569" strokeWidth="1" />
 
       {/* 3. LÂMINA / PONTA ACHATADA DA VARETA (ÁREA DE MEDIÇÃO) */}
       <path 
@@ -397,7 +408,7 @@ function VaretaSvg({ nivel = 'ideal', tipo = 'completo' }) {
            L 68 200 
            C 68 204, 52 204, 52 200 
            Z" 
-        fill="url(#bladeGrad)" 
+        fill={`url(#${bladeId})`} 
         stroke="#334155" 
         strokeWidth="1.5" 
       />
@@ -405,22 +416,18 @@ function VaretaSvg({ nivel = 'ideal', tipo = 'completo' }) {
       {/* Textura de Hachura de Fundo na Lâmina */}
       <path 
         d="M 53 133 L 67 133 L 67 199 L 53 199 Z" 
-        fill="url(#crosshatch)" 
+        fill={`url(#${patternId})`} 
       />
 
       {/* 4. PREENCHIMENTO DO LÍQUIDO DE ÓLEO */}
-      <g clipPath="url(#bladeClip)">
-        <clipPath id="bladeClip">
-          <path d="M 53 133 L 67 133 L 67 199 C 67 202, 53 202, 53 199 Z" />
-        </clipPath>
-        
+      <g clipPath={`url(#${clipId})`}>
         {/* Nível do Óleo Dourado */}
         <rect 
           x="53" 
           y={oilFillY} 
           width="14" 
           height={oilFillHeight} 
-          fill={`url(#${oilGradientId})`} 
+          fill={`url(#${oilId})`} 
           opacity="0.9"
         />
 
@@ -430,7 +437,7 @@ function VaretaSvg({ nivel = 'ideal', tipo = 'completo' }) {
           y={oilFillY} 
           width="14" 
           height={oilFillHeight} 
-          fill="url(#crosshatch)" 
+          fill={`url(#${patternId})`} 
           opacity="0.4"
         />
 

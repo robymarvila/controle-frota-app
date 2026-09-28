@@ -8,6 +8,18 @@ import {
 import { supabase } from '../supabaseClient';
 import GuiaMedicaoVaretaOleo from './GuiaMedicaoVaretaOleo';
 
+const parseDateSafe = (d) => {
+  if (!d) return null;
+  if (d instanceof Date) return isNaN(d.getTime()) ? null : d;
+  if (typeof d === 'number') {
+    const fromNum = new Date(d);
+    return isNaN(fromNum.getTime()) ? null : fromNum;
+  }
+  const str = String(d).trim().replace(' ', 'T');
+  const parsed = new Date(str);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
+
 const getWorkflowEtapaInfo = (c) => {
   if (!c) {
     return {
@@ -682,11 +694,12 @@ export default function NivelOleoView({
               (reg.chamado_codigo && (c.codigoChamado === reg.chamado_codigo || c.numero === reg.chamado_codigo)) ||
               (c.dadosWorkflow?.origemRegistroOleo === reg.codigo_registro)
             );
-            const isChamadoGerado = reg.status === 'CHAMADO_ABERTO' || !!reg.chamado_id || !!chamadoVinculado;
-            const dataFmt = new Date(reg.data_registro).toLocaleString('pt-BR', {
+            const isChamadoGerado = Boolean(reg.chamado_id || reg.chamado_codigo || chamadoVinculado);
+            const dateObj = parseDateSafe(reg.data_registro);
+            const dataFmt = dateObj ? dateObj.toLocaleString('pt-BR', {
               day: '2-digit', month: '2-digit', year: 'numeric',
               hour: '2-digit', minute: '2-digit'
-            });
+            }) : (reg.data_registro || '--');
 
             // Estilização baseada na criticidade
             // 2 = Âmbar, 3 = Vermelho, 1 = Normal/Verde

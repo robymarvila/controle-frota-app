@@ -47,6 +47,7 @@ import ForcaTrabalhoModule from './components/ForcaTrabalhoModule';
 import MobileShell from './components/mobile/MobileShell';
 import { useDeviceDetect } from './hooks/useDeviceDetect';
 import deviceTelemetryService from './services/deviceTelemetryService';
+import ErrorBoundary from './components/ErrorBoundary';
 
 import { DollarSign, PieChart as PieChartIcon, CalendarCheck } from 'lucide-react';
 import CustomFeedbackModal from './components/CustomFeedbackModal';
@@ -137,24 +138,31 @@ const initialChamados = [
 
 
 
-const calcularHorasParadas = (abertura, fechamento) => {
-
-  const dataFechamento = fechamento ? new Date(fechamento) : new Date();
-
-  const diffMs = dataFechamento - new Date(abertura);
-
-  const horas = diffMs / (1000 * 60 * 60);
-
-  return horas > 0 ? horas : 0;
-
+const parseDateSafe = (d) => {
+  if (!d) return null;
+  if (d instanceof Date) return isNaN(d.getTime()) ? null : d;
+  if (typeof d === 'number') {
+    const fromNum = new Date(d);
+    return isNaN(fromNum.getTime()) ? null : fromNum;
+  }
+  const str = String(d).trim().replace(' ', 'T');
+  const parsed = new Date(str);
+  return isNaN(parsed.getTime()) ? null : parsed;
 };
 
-
+const calcularHorasParadas = (abertura, fechamento) => {
+  const dataFechamento = parseDateSafe(fechamento) || new Date();
+  const dataAbertura = parseDateSafe(abertura);
+  if (!dataAbertura) return 0;
+  const diffMs = dataFechamento.getTime() - dataAbertura.getTime();
+  const horas = diffMs / (1000 * 60 * 60);
+  return horas > 0 ? horas : 0;
+};
 
 const formatarDataBR = (dataString) => {
   if (!dataString) return '--';
-  const data = new Date(dataString);
-  if (isNaN(data.getTime())) return String(dataString);
+  const data = parseDateSafe(dataString);
+  if (!data) return String(dataString);
   const dia = String(data.getDate()).padStart(2, '0');
   const mes = String(data.getMonth() + 1).padStart(2, '0');
   const ano = data.getFullYear();
@@ -168,8 +176,8 @@ const formatarTextoLog = (texto) => {
   if (!texto || typeof texto !== 'string') return texto || '';
   return texto.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:\+\d{2}:\d{2}|Z)?\b/g, (match) => {
     try {
-      const d = new Date(match);
-      if (!isNaN(d.getTime())) {
+      const d = parseDateSafe(match);
+      if (d) {
         const dia = String(d.getDate()).padStart(2, '0');
         const mes = String(d.getMonth() + 1).padStart(2, '0');
         const ano = d.getFullYear();
@@ -193,8 +201,8 @@ const getEtapaWorkflow = (c) => {
 
 const formatToDatetimeLocal = (dataString) => {
   if (!dataString) return '';
-  const data = new Date(dataString);
-  if (isNaN(data.getTime())) return '';
+  const data = parseDateSafe(dataString);
+  if (!data) return '';
   const ano = data.getFullYear();
   const mes = String(data.getMonth() + 1).padStart(2, '0');
   const dia = String(data.getDate()).padStart(2, '0');
@@ -3220,7 +3228,11 @@ export default function App() {
         {(activeTab === 'inicio' || activeTab === 'home' || activeTab === 'boas_vindas') && <InicioView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} setActiveTab={setActiveTab} setChamadoEmEdicao={setChamadoEmEdicao} theme={theme} isWelcomeModalOpen={isWelcomeModalOpen} userPermissions={userPermissions} />}
         {activeTab === 'calendario' && <CalendarioOperacionalView currentUser={currentUser} activeRegional={activeRegional} />}
         {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
-        {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />}
+        {activeTab === 'chamados' && (
+          <ErrorBoundary>
+            <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />
+          </ErrorBoundary>
+        )}
         {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
         {activeTab === 'frota' && <FrotaView vehicles={vehicles} laudosGeral={laudosGeral} onSelectVehicle={(v) => { setSelectedVehicle(v); setActiveTab('detalhes_veiculo'); }} userPermissions={userPermissions} />}
         {activeTab === 'ociosidade_frota' && <OciosidadeView vehicles={vehicles} chamados={chamados} hoje={hoje} />}
@@ -3276,7 +3288,11 @@ export default function App() {
         </MobileShell>
 
         {/* Modais — same for mobile and desktop */}
-        {(isNovoChamadoModalOpen || chamadoEmEdicao) && <ModalChamado vehicles={vehicles} colaboradores={colaboradores} chamadoEdicao={chamadoEmEdicao} currentUser={currentUser} onWorkflowTransition={handleWorkflowTransition} onClose={() => { setIsNovoChamadoModalOpen(false); setChamadoEmEdicao(null); }} onSubmit={handleSalvarChamado} onLiberar={(c) => { setChamadoParaLiberar(c); setChamadoEmEdicao(null); setIsNovoChamadoModalOpen(false); }} rawChamados={rawChamados} userPermissions={userPermissions} listaOficinas={listaOficinasNomes} />}
+        {(isNovoChamadoModalOpen || chamadoEmEdicao) && (
+          <ErrorBoundary>
+            <ModalChamado vehicles={vehicles} colaboradores={colaboradores} chamadoEdicao={chamadoEmEdicao} currentUser={currentUser} onWorkflowTransition={handleWorkflowTransition} onClose={() => { setIsNovoChamadoModalOpen(false); setChamadoEmEdicao(null); }} onSubmit={handleSalvarChamado} onLiberar={(c) => { setChamadoParaLiberar(c); setChamadoEmEdicao(null); setIsNovoChamadoModalOpen(false); }} rawChamados={rawChamados} userPermissions={userPermissions} listaOficinas={listaOficinasNomes} />
+          </ErrorBoundary>
+        )}
         {isNovoVeiculoModalOpen && <ModalNovoVeiculo onClose={() => setIsNovoVeiculoModalOpen(false)} onSubmit={handleCreateVeiculo} />}
         {chamadoParaLiberar && <ModalLiberarVeiculo chamado={chamadoParaLiberar} onClose={() => setChamadoParaLiberar(null)} onSubmit={handleLiberarVeiculo} />}
         {isNovoColaboradorModalOpen && <ModalNovoColaborador onClose={() => setIsNovoColaboradorModalOpen(false)} onSubmit={handleCreateColaborador} />}
@@ -3549,7 +3565,11 @@ export default function App() {
 
           {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
 
-          {activeTab === 'chamados' && <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />}
+          {activeTab === 'chamados' && (
+            <ErrorBoundary>
+              <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />
+            </ErrorBoundary>
+          )}
 
           {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
 
@@ -3630,7 +3650,11 @@ export default function App() {
 
       {/* Modais */}
 
-      {(isNovoChamadoModalOpen || chamadoEmEdicao) && <ModalChamado vehicles={vehicles} colaboradores={colaboradores} chamadoEdicao={chamadoEmEdicao} currentUser={currentUser} onWorkflowTransition={handleWorkflowTransition} onClose={() => { setIsNovoChamadoModalOpen(false); setChamadoEmEdicao(null); }} onSubmit={handleSalvarChamado} onLiberar={(c) => { setChamadoParaLiberar(c); setChamadoEmEdicao(null); setIsNovoChamadoModalOpen(false); }} rawChamados={rawChamados} userPermissions={userPermissions} listaOficinas={listaOficinasNomes} />}
+      {(isNovoChamadoModalOpen || chamadoEmEdicao) && (
+        <ErrorBoundary>
+          <ModalChamado vehicles={vehicles} colaboradores={colaboradores} chamadoEdicao={chamadoEmEdicao} currentUser={currentUser} onWorkflowTransition={handleWorkflowTransition} onClose={() => { setIsNovoChamadoModalOpen(false); setChamadoEmEdicao(null); }} onSubmit={handleSalvarChamado} onLiberar={(c) => { setChamadoParaLiberar(c); setChamadoEmEdicao(null); setIsNovoChamadoModalOpen(false); }} rawChamados={rawChamados} userPermissions={userPermissions} listaOficinas={listaOficinasNomes} />
+        </ErrorBoundary>
+      )}
 
       {isNovoVeiculoModalOpen && <ModalNovoVeiculo onClose={() => setIsNovoVeiculoModalOpen(false)} onSubmit={handleCreateVeiculo} />}
 
@@ -10944,42 +10968,44 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
           const logsUnificados = Array.from(mapHistorico.values()).sort((a, b) => new Date(b.dataHora || 0) - new Date(a.dataHora || 0));
 
-          let dWf = cData.dadosWorkflow || prev.dadosWorkflow || {};
-          if (typeof dWf === 'string') {
-            try { dWf = JSON.parse(dWf); } catch(e) {}
-          }
-          if (!dWf.subFluxoOficina && (cData.sub_fluxo_status || prev.sub_fluxo_status)) {
-            dWf = {
-              ...dWf,
-              subFluxoOficina: {
-                status: cData.sub_fluxo_status || prev.sub_fluxo_status || 'DIRETA',
-                pedidoCompras: cData.pedido_compras !== undefined ? cData.pedido_compras : (prev.pedido_compras || null),
-                dataEnvioCompras: cData.data_envio_compras !== undefined ? cData.data_envio_compras : (prev.data_envio_compras || null),
-                observacaoCompras: cData.observacao_compras !== undefined ? cData.observacao_compras : (prev.observacao_compras || null)
-              }
-            };
-          }
+          setFormData(prev => {
+            let dWf = cData.dadosWorkflow || prev?.dadosWorkflow || {};
+            if (typeof dWf === 'string') {
+              try { dWf = JSON.parse(dWf); } catch(e) {}
+            }
+            if (!dWf.subFluxoOficina && (cData.sub_fluxo_status || prev?.sub_fluxo_status)) {
+              dWf = {
+                ...dWf,
+                subFluxoOficina: {
+                  status: cData.sub_fluxo_status || prev?.sub_fluxo_status || 'DIRETA',
+                  pedidoCompras: cData.pedido_compras !== undefined ? cData.pedido_compras : (prev?.pedido_compras || null),
+                  dataEnvioCompras: cData.data_envio_compras !== undefined ? cData.data_envio_compras : (prev?.data_envio_compras || null),
+                  observacaoCompras: cData.observacao_compras !== undefined ? cData.observacao_compras : (prev?.observacao_compras || null)
+                }
+              };
+            }
 
-          const rawDefs = cData.defeitos || prev.defeitos || [];
-          const normalizedDefs = (Array.isArray(rawDefs) ? rawDefs : []).map(d => {
-            const rawCat = d.categoria || cData.defeitoPrincipal || prev.defeitoPrincipal || 'Outros';
+            const rawDefs = cData.defeitos || prev?.defeitos || [];
+            const normalizedDefs = (Array.isArray(rawDefs) ? rawDefs : []).map(d => {
+              const rawCat = d.categoria || cData.defeitoPrincipal || prev?.defeitoPrincipal || 'Outros';
+              return {
+                ...d,
+                categoria: rawCat === 'Mecanico' ? 'Mecânico' : rawCat,
+                numeroSolicitacao: d.numeroSolicitacao || cData.numero || prev?.numero || ''
+              };
+            });
+
             return {
-              ...d,
-              categoria: rawCat === 'Mecanico' ? 'Mecânico' : rawCat,
-              numeroSolicitacao: d.numeroSolicitacao || cData.numero || prev.numero || ''
+              ...prev,
+              ...cData,
+              defeitos: normalizedDefs.length > 0 ? normalizedDefs : prev?.defeitos,
+              hodometro: cData.hodometro !== null && cData.hodometro !== undefined ? String(cData.hodometro) : (cData.dadosWorkflow?.hodometro || prev?.hodometro || ''),
+              fotosChamado: cData.dadosWorkflow?.fotosChamado || cData.fotosChamado || prev?.fotosChamado || {},
+              dataAbertura: formatToDatetimeLocal(cData.dataAbertura || prev?.dataAbertura),
+              dadosWorkflow: dWf,
+              historicoModificacoes: logsUnificados
             };
           });
-
-          setFormData(prev => ({
-            ...prev,
-            ...cData,
-            defeitos: normalizedDefs.length > 0 ? normalizedDefs : prev.defeitos,
-            hodometro: cData.hodometro !== null && cData.hodometro !== undefined ? String(cData.hodometro) : (cData.dadosWorkflow?.hodometro || prev.hodometro || ''),
-            fotosChamado: cData.dadosWorkflow?.fotosChamado || cData.fotosChamado || prev.fotosChamado || {},
-            dataAbertura: formatToDatetimeLocal(cData.dataAbertura || prev.dataAbertura),
-            dadosWorkflow: dWf,
-            historicoModificacoes: logsUnificados
-          }));
         }
       });
     }
@@ -14754,95 +14780,73 @@ function SearchableSelect({ value, onChange, options, placeholder, className }) 
 
 
   React.useEffect(() => {
-
     function handleClickOutside(event) {
-
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setIsOpen(false);
-
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
     }
-
     document.addEventListener("mousedown", handleClickOutside);
-
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-
+    document.addEventListener("touchstart", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
   }, [wrapperRef]);
 
-
-
   const filteredOptions = (query === '' || options.find(o => o.value === value)?.label === query)
-
     ? options 
-
     : options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()) || o.value.toLowerCase().includes(query.toLowerCase()));
 
-
-
   return (
-
     <div ref={wrapperRef} className="relative w-full">
-
       <input
-
         type="text"
-
-        className={className}
-
+        className={`${className} text-base sm:text-sm`}
         placeholder={placeholder}
-
         value={query}
-
+        onFocus={() => setIsOpen(true)}
         onClick={() => setIsOpen(true)}
-
         onChange={(e) => {
-
           setQuery(e.target.value);
-
           setIsOpen(true);
-
           if (e.target.value === '') onChange('');
-
         }}
-
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="characters"
+        spellCheck="false"
       />
-
       {isOpen && (
-
         <ul className="absolute z-50 w-full bg-white mt-1 rounded-xl shadow-2xl border border-slate-200 max-h-48 overflow-y-auto">
-
           {filteredOptions.length > 0 ? filteredOptions.map((opt, idx) => (
-
             <li 
-
               key={`${opt.value}-${idx}`} 
-
-              className="p-3 text-xs font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 cursor-pointer border-b border-slate-50 last:border-0 break-words whitespace-normal"
-
-              onClick={() => {
-
+              className="p-3 text-xs font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 cursor-pointer border-b border-slate-50 last:border-0 break-words whitespace-normal select-none"
+              onMouseDown={(e) => {
+                e.preventDefault();
                 onChange(opt.value);
-
                 setQuery(opt.label);
-
                 setIsOpen(false);
-
               }}
-
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                onChange(opt.value);
+                setQuery(opt.label);
+                setIsOpen(false);
+              }}
+              onClick={() => {
+                onChange(opt.value);
+                setQuery(opt.label);
+                setIsOpen(false);
+              }}
             >
-
               {opt.label}
-
             </li>
-
           )) : <li className="p-3 text-xs text-slate-400">Nenhum resultado...</li>}
-
         </ul>
-
       )}
-
     </div>
-
   );
-
 }
 
 
