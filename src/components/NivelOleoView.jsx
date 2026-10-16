@@ -3,7 +3,7 @@ import {
   Droplets, BookOpen, AlertTriangle, Flame, CheckCircle2, Search, Filter, 
   RefreshCcw, Eye, Wrench, Plus, Car, Gauge, Calendar, User, 
   ExternalLink, ArrowUpRight, Check, X, ShieldAlert, Sparkles, Loader2, Trash2,
-  ChevronRight, Activity
+  ChevronRight, Activity, Waves
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import GuiaMedicaoVaretaOleo from './GuiaMedicaoVaretaOleo';
@@ -96,7 +96,8 @@ export default function NivelOleoView({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filtroNivel, setFiltroNivel] = useState('ALL');
-  const [showGuiaModal, setShowGuiaModal] = useState(false); // 'ALL' | '1' | '2' | '3'
+  const [filtroAgua, setFiltroAgua] = useState('ALL'); // 'ALL' | 'Baixo'
+  const [showGuiaModal, setShowGuiaModal] = useState(false);
   const [filtroStatus, setFiltroStatus] = useState('ALL'); // 'ALL' | 'PENDENTE' | 'CHAMADO_ABERTO'
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -220,17 +221,24 @@ export default function NivelOleoView({
     const normal = registros.filter(r => r.nivel_oleo === 1).length;
     const baixo = registros.filter(r => r.nivel_oleo === 2).length;
     const semOleo = registros.filter(r => r.nivel_oleo === 3).length;
+    const aguaBaixa = registros.filter(r => r.nivel_agua === 'Baixo').length;
     const chamadosAbertos = registros.filter(r => r.status === 'CHAMADO_ABERTO').length;
-    const pendentesAbertura = registros.filter(r => (r.nivel_oleo === 2 || r.nivel_oleo === 3) && r.status !== 'CHAMADO_ABERTO').length;
+    const pendentesAbertura = registros.filter(r => 
+      ((r.nivel_oleo === 2 || r.nivel_oleo === 3) || r.nivel_agua === 'Baixo') && 
+      r.status !== 'CHAMADO_ABERTO'
+    ).length;
 
-    return { total, normal, baixo, semOleo, chamadosAbertos, pendentesAbertura };
+    return { total, normal, baixo, semOleo, aguaBaixa, chamadosAbertos, pendentesAbertura };
   }, [registros]);
 
   // Filtragem
   const registrosFiltrados = useMemo(() => {
     return registros.filter(r => {
-      // Filtro de Nível
+      // Filtro de Nível de Óleo
       if (filtroNivel !== 'ALL' && String(r.nivel_oleo) !== String(filtroNivel)) return false;
+
+      // Filtro de Nível de Água
+      if (filtroAgua === 'Baixo' && r.nivel_agua !== 'Baixo') return false;
 
       // Filtro de Status
       if (filtroStatus === 'PENDENTE' && r.status === 'CHAMADO_ABERTO') return false;
@@ -243,12 +251,13 @@ export default function NivelOleoView({
         const userMatch = (r.criado_por || '').toLowerCase().includes(q);
         const regMatch = (r.regional || '').toLowerCase().includes(q);
         const codMatch = (r.codigo_registro || '').toLowerCase().includes(q);
-        if (!placaMatch && !userMatch && !regMatch && !codMatch) return false;
+        const aguaMatch = (r.nivel_agua || '').toLowerCase().includes(q);
+        if (!placaMatch && !userMatch && !regMatch && !codMatch && !aguaMatch) return false;
       }
 
       return true;
     });
-  }, [registros, filtroNivel, filtroStatus, searchQuery]);
+  }, [registros, filtroNivel, filtroAgua, filtroStatus, searchQuery]);
 
   // Identificar se o veículo já possui chamado aberto no sistema
   const getChamadoAbertoExistente = (placa) => {
@@ -271,7 +280,16 @@ export default function NivelOleoView({
       const dataHoraAberturaIso = (hoje || new Date()).toISOString();
 
       const rotuloNivel = reg.nivel_oleo === 3 ? 'Sem Óleo' : reg.nivel_oleo === 2 ? 'Baixo' : 'Normal';
-      const descricaoDefeito = `Troca de Oleo - ${rotuloNivel}`;
+      const rotuloAgua = reg.nivel_agua || 'Médio';
+      const fotoHasteFinal = reg.foto_haste_com_oleo_url || reg.foto_haste_url || null;
+      const fotoAguaFinal = reg.foto_reservatorio_agua_url || null;
+
+      let descricaoDefeito = `Troca de Oleo - ${rotuloNivel}`;
+      if (rotuloAgua === 'Baixo') {
+        descricaoDefeito = (reg.nivel_oleo === 2 || reg.nivel_oleo === 3)
+          ? `Troca de Oleo (${rotuloNivel}) + Nível de Água Baixo no Reservatório`
+          : `Sistema de Arrefecimento - Nível de Água Baixo no Reservatório`;
+      }
 
       let chamadoCriadoOuAtualizadoId = null;
       let chamadoCriadoOuAtualizadoCodigo = null;
@@ -285,7 +303,7 @@ export default function NivelOleoView({
           numeroSolicitacao: 'SOL-000000',
           isImpeditivo: true,
           status: 'PENDENTE',
-          fotoDefeito: reg.foto_haste_url || null
+          fotoDefeito: (reg.nivel_oleo === 2 || reg.nivel_oleo === 3) ? fotoHasteFinal : (fotoAguaFinal || fotoHasteFinal)
         };
 
         let baseChamado = chamadoExistente;
@@ -301,7 +319,7 @@ export default function NivelOleoView({
         }
 
         const defeitosAtualizados = [...(baseChamado.defeitos || []), novoDefeito];
-        const logAnexo = `[Óleo do Motor] Defeito anexado automaticamente por ${operadorNome}: ${descricaoDefeito}. Hodômetro: ${reg.hodometro?.toLocaleString('pt-BR')} km. Ref: ${reg.codigo_registro}`;
+        const logAnexo = `[Inspeção Motor & Arrefecimento] Defeito anexado automaticamente por ${operadorNome}: ${descricaoDefeito}. Hodômetro: ${reg.hodometro?.toLocaleString('pt-BR')} km. Ref: ${reg.codigo_registro}`;
         
         const chamadoAtualizado = {
           ...baseChamado,
@@ -340,7 +358,7 @@ export default function NivelOleoView({
           defeitoPrincipal: 'Mecânico',
           defeitoEncontrado: descricaoDefeito,
           naoImpeditivo: false,
-          forcarNovoChamadoSeparado: true, // Avisa handleSalvarChamado para não forçar o anexo
+          forcarNovoChamadoSeparado: true,
           defeitos: [
             {
               id: Date.now(),
@@ -349,13 +367,15 @@ export default function NivelOleoView({
               numeroSolicitacao: 'SOL-000000',
               isImpeditivo: true,
               status: 'PENDENTE',
-              fotoDefeito: reg.foto_haste_url || null
+              fotoDefeito: (reg.nivel_oleo === 2 || reg.nivel_oleo === 3) ? fotoHasteFinal : (fotoAguaFinal || fotoHasteFinal)
             }
           ],
           fotosChamado: {
             fotoVeiculo: reg.foto_frente_url || null,
             fotoHodometro: reg.foto_hodometro_url || null,
-            fotoAdicional: reg.foto_haste_url || null
+            fotoAdicional: fotoHasteFinal,
+            fotoHasteLimpa: reg.foto_haste_limpa_url || null,
+            fotoReservatorioAgua: fotoAguaFinal
           },
           dadosWorkflow: {
             criadoPor: operadorNome,
@@ -363,7 +383,9 @@ export default function NivelOleoView({
             fotosChamado: {
               fotoVeiculo: reg.foto_frente_url || null,
               fotoHodometro: reg.foto_hodometro_url || null,
-              fotoAdicional: reg.foto_haste_url || null
+              fotoAdicional: fotoHasteFinal,
+              fotoHasteLimpa: reg.foto_haste_limpa_url || null,
+              fotoReservatorioAgua: fotoAguaFinal
             },
             timestamps: {
               'Análise Frota': dataHoraAberturaIso
@@ -435,112 +457,135 @@ export default function NivelOleoView({
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* 1. CARDS DE RESUMO E KPIS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
         {/* Total de Registros */}
-        <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-200/90 dark:border-slate-800 p-4 shadow-sm">
+        <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-200/90 dark:border-slate-800 p-3.5 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black uppercase text-slate-400">Total Aferições</span>
-            <Droplets size={16} className="text-slate-400" />
+            <span className="text-[10px] font-black uppercase text-slate-400">Total Aferições</span>
+            <Droplets size={15} className="text-slate-400" />
           </div>
-          <p className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+          <p className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1.5">
             {stats.total}
           </p>
-          <span className="text-[10px] text-slate-500 font-medium">Registradas no sistema</span>
+          <span className="text-[9.5px] text-slate-500 font-medium">Registradas</span>
         </div>
 
         {/* Nível Normal */}
         <div 
           onClick={() => setFiltroNivel(filtroNivel === '1' ? 'ALL' : '1')}
-          className={`cursor-pointer transition-all rounded-2xl border p-4 shadow-sm active:scale-95 ${
+          className={`cursor-pointer transition-all rounded-2xl border p-3.5 shadow-sm active:scale-95 ${
             filtroNivel === '1' 
               ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 ring-2 ring-emerald-200 dark:ring-emerald-800' 
               : 'bg-white/90 dark:bg-slate-900/90 border-slate-200/90 dark:border-slate-800 hover:border-emerald-300'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black uppercase text-emerald-600 dark:text-emerald-400">1. Normal</span>
-            <CheckCircle2 size={16} className="text-emerald-600" />
+            <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400">1. Normal</span>
+            <CheckCircle2 size={15} className="text-emerald-600" />
           </div>
-          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">
+          <p className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1.5">
             {stats.normal}
           </p>
-          <span className="text-[10px] text-emerald-700/70 dark:text-emerald-400/70 font-medium">Dentro do recomendado</span>
+          <span className="text-[9.5px] text-emerald-700/70 dark:text-emerald-400/70 font-medium">Recomendado</span>
         </div>
 
         {/* Nível Baixo (Âmbar) */}
         <div 
           onClick={() => setFiltroNivel(filtroNivel === '2' ? 'ALL' : '2')}
-          className={`cursor-pointer transition-all rounded-2xl border p-4 shadow-sm active:scale-95 ${
+          className={`cursor-pointer transition-all rounded-2xl border p-3.5 shadow-sm active:scale-95 ${
             filtroNivel === '2' 
               ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-400 ring-2 ring-amber-200 dark:ring-amber-800' 
               : 'bg-white/90 dark:bg-slate-900/90 border-slate-200/90 dark:border-slate-800 hover:border-amber-300'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black uppercase text-amber-600 dark:text-amber-400">2. Baixo</span>
-            <AlertTriangle size={16} className="text-amber-500" />
+            <span className="text-[10px] font-black uppercase text-amber-600 dark:text-amber-400">2. Baixo</span>
+            <AlertTriangle size={15} className="text-amber-500" />
           </div>
-          <p className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-2">
+          <p className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 mt-1.5">
             {stats.baixo}
           </p>
-          <span className="text-[10px] text-amber-700/70 dark:text-amber-400/70 font-medium">Requer complemento</span>
+          <span className="text-[9.5px] text-amber-700/70 dark:text-amber-400/70 font-medium">Complementar</span>
         </div>
 
         {/* Sem Óleo (Vermelho Crítico) */}
         <div 
           onClick={() => setFiltroNivel(filtroNivel === '3' ? 'ALL' : '3')}
-          className={`cursor-pointer transition-all rounded-2xl border p-4 shadow-sm active:scale-95 ${
+          className={`cursor-pointer transition-all rounded-2xl border p-3.5 shadow-sm active:scale-95 ${
             filtroNivel === '3' 
               ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-500 ring-2 ring-rose-200 dark:ring-rose-800' 
               : 'bg-white/90 dark:bg-slate-900/90 border-slate-200/90 dark:border-slate-800 hover:border-rose-300'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black uppercase text-rose-600 dark:text-rose-400">3. Sem Óleo</span>
-            <Flame size={16} className="text-rose-600 animate-pulse" />
+            <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">3. Sem Óleo</span>
+            <Flame size={15} className="text-rose-600 animate-pulse" />
           </div>
-          <p className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-2">
+          <p className="text-xl sm:text-2xl font-black text-rose-600 dark:text-rose-400 mt-1.5">
             {stats.semOleo}
           </p>
-          <span className="text-[10px] text-rose-700/70 dark:text-rose-400/70 font-medium">Crítico / Não rodar</span>
+          <span className="text-[9.5px] text-rose-700/70 dark:text-rose-400/70 font-medium">Crítico</span>
+        </div>
+
+        {/* Água Baixa (Novo KPI) */}
+        <div 
+          onClick={() => setFiltroAgua(filtroAgua === 'Baixo' ? 'ALL' : 'Baixo')}
+          className={`cursor-pointer transition-all rounded-2xl border p-3.5 shadow-sm active:scale-95 ${
+            filtroAgua === 'Baixo' 
+              ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-500 ring-2 ring-sky-200 dark:ring-sky-800' 
+              : stats.aguaBaixa > 0
+                ? 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-300 dark:border-rose-900 hover:border-rose-400'
+                : 'bg-white/90 dark:bg-slate-900/90 border-slate-200/90 dark:border-slate-800 hover:border-sky-300'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className={`text-[10px] font-black uppercase ${stats.aguaBaixa > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-sky-600 dark:text-sky-400'}`}>
+              Água Baixa
+            </span>
+            <Waves size={15} className={stats.aguaBaixa > 0 ? 'text-rose-500' : 'text-sky-500'} />
+          </div>
+          <p className={`text-xl sm:text-2xl font-black mt-1.5 ${stats.aguaBaixa > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-sky-600 dark:text-sky-400'}`}>
+            {stats.aguaBaixa}
+          </p>
+          <span className="text-[9.5px] text-slate-500 font-medium">Arrefecimento</span>
         </div>
 
         {/* Pendentes de Tratativa */}
         <div 
           onClick={() => setFiltroStatus(filtroStatus === 'PENDENTE' ? 'ALL' : 'PENDENTE')}
-          className={`cursor-pointer transition-all rounded-2xl border p-4 shadow-sm active:scale-95 ${
+          className={`cursor-pointer transition-all rounded-2xl border p-3.5 shadow-sm active:scale-95 ${
             filtroStatus === 'PENDENTE' 
               ? 'bg-orange-50 dark:bg-orange-950/40 border-orange-400 ring-2 ring-orange-200' 
               : 'bg-white/90 dark:bg-slate-900/90 border-slate-200/90 dark:border-slate-800 hover:border-orange-300'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black uppercase text-orange-600 dark:text-orange-400">Aguardando OS</span>
-            <ShieldAlert size={16} className="text-orange-500" />
+            <span className="text-[10px] font-black uppercase text-orange-600 dark:text-orange-400">Aguardando OS</span>
+            <ShieldAlert size={15} className="text-orange-500" />
           </div>
-          <p className="text-2xl font-black text-orange-600 dark:text-orange-400 mt-2">
+          <p className="text-xl sm:text-2xl font-black text-orange-600 dark:text-orange-400 mt-1.5">
             {stats.pendentesAbertura}
           </p>
-          <span className="text-[10px] text-orange-700/70 dark:text-orange-400/70 font-medium">Baixo / Sem Óleo s/ chamado</span>
+          <span className="text-[9.5px] text-orange-700/70 dark:text-orange-400/70 font-medium">Críticos s/ OS</span>
         </div>
 
         {/* Chamados Abertos */}
         <div 
           onClick={() => setFiltroStatus(filtroStatus === 'CHAMADO_ABERTO' ? 'ALL' : 'CHAMADO_ABERTO')}
-          className={`cursor-pointer transition-all rounded-2xl border p-4 shadow-sm active:scale-95 ${
+          className={`cursor-pointer transition-all rounded-2xl border p-3.5 shadow-sm active:scale-95 ${
             filtroStatus === 'CHAMADO_ABERTO' 
               ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-400 ring-2 ring-blue-200' 
               : 'bg-white/90 dark:bg-slate-900/90 border-slate-200/90 dark:border-slate-800 hover:border-blue-300'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black uppercase text-blue-600 dark:text-blue-400">OS Geradas</span>
-            <Wrench size={16} className="text-blue-600" />
+            <span className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400">OS Geradas</span>
+            <Wrench size={15} className="text-blue-600" />
           </div>
-          <p className="text-2xl font-black text-blue-600 dark:text-blue-400 mt-2">
+          <p className="text-xl sm:text-2xl font-black text-blue-600 dark:text-blue-400 mt-1.5">
             {stats.chamadosAbertos}
           </p>
-          <span className="text-[10px] text-blue-700/70 dark:text-blue-400/70 font-medium">Convertidos em chamado</span>
+          <span className="text-[9.5px] text-blue-700/70 dark:text-blue-400/70 font-medium">Convertidos</span>
         </div>
       </div>
 
@@ -597,9 +642,9 @@ export default function NivelOleoView({
           {/* Seletor Nível */}
           <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
             <button
-              onClick={() => setFiltroNivel('ALL')}
+              onClick={() => { setFiltroNivel('ALL'); setFiltroAgua('ALL'); }}
               className={`px-3 py-1.5 rounded-lg transition-all ${
-                filtroNivel === 'ALL' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500'
+                filtroNivel === 'ALL' && filtroAgua === 'ALL' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500'
               }`}
             >
               Todos
@@ -627,6 +672,15 @@ export default function NivelOleoView({
               }`}
             >
               Sem Óleo
+            </button>
+            <button
+              onClick={() => setFiltroAgua(filtroAgua === 'Baixo' ? 'ALL' : 'Baixo')}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 ${
+                filtroAgua === 'Baixo' ? 'bg-sky-600 text-white shadow-sm' : 'text-sky-600 dark:text-sky-400'
+              }`}
+            >
+              <Waves size={12} />
+              <span>Água Baixa</span>
             </button>
           </div>
 
@@ -714,13 +768,15 @@ export default function NivelOleoView({
                     ? 'border-rose-400/90 bg-rose-50/60 dark:bg-rose-950/25 ring-1 ring-rose-200 dark:ring-rose-900/60'
                     : isNivel2
                       ? 'border-amber-400/90 bg-amber-50/50 dark:bg-amber-950/20 ring-1 ring-amber-200 dark:ring-amber-900/60'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                      : reg.nivel_agua === 'Baixo'
+                        ? 'border-sky-400/90 bg-sky-50/40 dark:bg-sky-950/20 ring-1 ring-sky-200 dark:ring-sky-900/60'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
                 }`}
               >
                 <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-                  {/* Bloco 1: Identificação do Veículo & Nível */}
+                  {/* Bloco 1: Identificação do Veículo & Nível de Óleo + Nível de Água */}
                   <div className="flex items-start gap-4 min-w-[280px]">
-                    {/* Badge / Ícone do Nível */}
+                    {/* Badge / Ícone do Nível de Óleo */}
                     <div className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center shrink-0 shadow-sm ${
                       isNivel3
                         ? 'bg-rose-600 text-white shadow-rose-600/30'
@@ -741,13 +797,26 @@ export default function NivelOleoView({
                     </div>
 
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
                           {reg.placa}
                         </span>
                         <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                           {reg.regional || vInfo?.regional || 'Regional'}
                         </span>
+                        
+                        {/* Badge de Nível de Água */}
+                        <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1 border ${
+                          reg.nivel_agua === 'Baixo'
+                            ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
+                            : reg.nivel_agua === 'Alto'
+                              ? 'bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800'
+                              : 'bg-teal-100 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 border-teal-300 dark:border-teal-800'
+                        }`}>
+                          <Waves size={11} />
+                          <span>Água: {reg.nivel_agua || 'Médio'}</span>
+                        </span>
+
                         {reg.codigo_registro && (
                           <span className="text-[10px] font-mono font-bold text-slate-400">
                             {reg.codigo_registro}
@@ -778,27 +847,41 @@ export default function NivelOleoView({
                     </div>
                   </div>
 
-                  {/* Bloco 2: 3 Miniaturas de Fotos */}
-                  <div className="flex items-center gap-2.5">
+                  {/* Bloco 2: 5 Miniaturas de Fotos */}
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full">
                     {/* Foto Frente */}
                     <ThumbnailPhoto
                       url={reg.foto_frente_url}
-                      label="Frente do Veículo"
+                      label="1. Frente"
                       onZoom={() => onPreviewImage && onPreviewImage({ url: reg.foto_frente_url, label: `Frente do Veículo - ${reg.placa}` })}
                     />
 
                     {/* Foto Hodômetro */}
                     <ThumbnailPhoto
                       url={reg.foto_hodometro_url}
-                      label="Hodômetro"
+                      label="2. Hodômetro"
                       onZoom={() => onPreviewImage && onPreviewImage({ url: reg.foto_hodometro_url, label: `Hodômetro (${reg.hodometro} km) - ${reg.placa}` })}
                     />
 
-                    {/* Foto Haste */}
+                    {/* Foto Haste Limpa */}
                     <ThumbnailPhoto
-                      url={reg.foto_haste_url}
-                      label="Vareta de Óleo"
-                      onZoom={() => onPreviewImage && onPreviewImage({ url: reg.foto_haste_url, label: `Haste do Nível (${reg.nivel_oleo_rotulo}) - ${reg.placa}` })}
+                      url={reg.foto_haste_limpa_url}
+                      label="3. Haste Limpa"
+                      onZoom={() => onPreviewImage && onPreviewImage({ url: reg.foto_haste_limpa_url, label: `Haste Limpa com Pano - ${reg.placa}` })}
+                    />
+
+                    {/* Foto Haste C/ Óleo */}
+                    <ThumbnailPhoto
+                      url={reg.foto_haste_com_oleo_url || reg.foto_haste_url}
+                      label="4. Haste c/ Óleo"
+                      onZoom={() => onPreviewImage && onPreviewImage({ url: reg.foto_haste_com_oleo_url || reg.foto_haste_url, label: `Haste C/ Óleo (${reg.nivel_oleo_rotulo}) - ${reg.placa}` })}
+                    />
+
+                    {/* Foto Reservatório de Água */}
+                    <ThumbnailPhoto
+                      url={reg.foto_reservatorio_agua_url}
+                      label="5. Reserv. Água"
+                      onZoom={() => onPreviewImage && onPreviewImage({ url: reg.foto_reservatorio_agua_url, label: `Reservatório de Água (${reg.nivel_agua || 'Médio'}) - ${reg.placa}` })}
                     />
                   </div>
 
@@ -1023,14 +1106,20 @@ export default function NivelOleoView({
                   <span className="font-black text-slate-800 dark:text-white">{registroParaAbertura.hodometro?.toLocaleString('pt-BR')} km</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400 font-bold uppercase text-[10px]">Defeito Principal:</span>
+                  <span className="text-slate-400 font-bold uppercase text-[10px]">Nível de Óleo:</span>
                   <span className="font-black text-amber-600 dark:text-amber-400">
-                    Troca de Oleo - {registroParaAbertura.nivel_oleo_rotulo}
+                    {registroParaAbertura.nivel_oleo_rotulo || (registroParaAbertura.nivel_oleo === 3 ? 'Sem Óleo' : 'Baixo')}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 font-bold uppercase text-[10px]">Nível de Água:</span>
+                  <span className={`font-black ${registroParaAbertura.nivel_agua === 'Baixo' ? 'text-rose-600' : 'text-sky-600'}`}>
+                    {registroParaAbertura.nivel_agua || 'Médio'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400 font-bold uppercase text-[10px]">Categoria:</span>
-                  <span className="font-black text-slate-800 dark:text-white">Mecanico</span>
+                  <span className="font-black text-slate-800 dark:text-white">Mecânico</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400 font-bold uppercase text-[10px]">Nº SOL (E-CAR):</span>
@@ -1042,7 +1131,7 @@ export default function NivelOleoView({
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400 font-bold uppercase text-[10px]">Evidências:</span>
-                  <span className="font-black text-emerald-600">3 Fotos importadas</span>
+                  <span className="font-black text-emerald-600">5 Fotos vinculadas</span>
                 </div>
               </div>
 

@@ -1340,15 +1340,24 @@ export default function App() {
       const { data: laudosData } = await supabase.from('veiculo_laudos').select('*').order('data_inclusao', { ascending: false });
       if (laudosData) setLaudosGeral(laudosData);
 
-      // Busca otimizada e rápida dos chamados (sem colunas pesadas de fotos base64 para evitar timeout)
+      // Busca otimizada e ultra rápida dos chamados gerais (colunas leves sem fotos pesadas para evitar statement timeout)
       const fieldsChamados = 'id,placa,numero,dataAbertura,dataHoraFechamento,situacaoVeiculo,oficinaExterna,status,pendencia,defeitoEncontrado,motorista,defeitoPrincipal,etapaWorkflow,naoImpeditivo,prejuizoAcumulado,oficinaDestino,regional,codigoChamado,alertas,hodometro,tipo_oficina,diagnostico_mecanico,pecas_necessarias,sub_fluxo_status,pedido_compras,data_envio_compras,observacao_compras,criado_por';
       let cData = null;
       let cErr = null;
+      let openChamadosExtras = new Map();
 
       try {
-        const res = await supabase.from('chamados').select(fieldsChamados).order('id', { ascending: false }).limit(1000);
+        const [res, resOpen] = await Promise.all([
+          supabase.from('chamados').select(fieldsChamados).order('id', { ascending: false }).limit(1000),
+          supabase.from('chamados').select('id, defeitos, dadosWorkflow').neq('status', 'RESOLVIDO')
+        ]);
         cData = res.data;
         cErr = res.error;
+        if (resOpen.data && Array.isArray(resOpen.data)) {
+          resOpen.data.forEach(item => {
+            openChamadosExtras.set(item.id, item);
+          });
+        }
       } catch (err) {
         cErr = err;
       }
@@ -1398,12 +1407,13 @@ export default function App() {
             etapa = 'Aguardando Desequipar';
           }
 
-          let defs = c.defeitos;
+          const extraOpen = openChamadosExtras.get(c.id);
+          let defs = extraOpen?.defeitos || c.defeitos;
           if (typeof defs === 'string') {
             try { defs = JSON.parse(defs); } catch(e) {}
           }
           if (!Array.isArray(defs) || defs.length === 0) {
-            let wfDefs = c.dadosWorkflow?.defeitos || c.dados_workflow?.defeitos;
+            let wfDefs = extraOpen?.dadosWorkflow?.defeitos || c.dadosWorkflow?.defeitos || c.dados_workflow?.defeitos;
             if (typeof wfDefs === 'string') {
               try { wfDefs = JSON.parse(wfDefs); } catch(e) {}
             }
@@ -1430,7 +1440,7 @@ export default function App() {
             }));
           }
 
-          let dWorkflow = c.dadosWorkflow || c.dados_workflow;
+          let dWorkflow = extraOpen?.dadosWorkflow || c.dadosWorkflow || c.dados_workflow;
           if (typeof dWorkflow === 'string') {
             try { dWorkflow = JSON.parse(dWorkflow); } catch(e) {}
           }
@@ -1793,6 +1803,18 @@ export default function App() {
             fotosChamado: payload.fotosChamado
           };
           delete payload.fotosChamado;
+        }
+        if (payload.fotoVeiculo || payload.fotoHodometro) {
+          payload.dadosWorkflow = {
+            ...(payload.dadosWorkflow || {}),
+            fotosChamado: {
+              ...(payload.dadosWorkflow?.fotosChamado || {}),
+              ...(payload.fotoVeiculo ? { veiculo: payload.fotoVeiculo, fotoVeiculo: payload.fotoVeiculo } : {}),
+              ...(payload.fotoHodometro ? { hodometro: payload.fotoHodometro, fotoHodometro: payload.fotoHodometro } : {})
+            }
+          };
+          delete payload.fotoVeiculo;
+          delete payload.fotoHodometro;
         }
         delete payload.motoristaOutro;
         delete payload.forcarNovoChamadoSeparado;
@@ -11080,6 +11102,8 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
   const [novoDefeitoCategoria, setNovoDefeitoCategoria] = useState('');
   const [novoDefeitoECar, setNovoDefeitoECar] = useState('');
   const [novoDefeitoFoto, setNovoDefeitoFoto] = useState(null);
+  const [duplicidadeFotoVeiculo, setDuplicidadeFotoVeiculo] = useState(null);
+  const [duplicidadeFotoHodometro, setDuplicidadeFotoHodometro] = useState(null);
 
   const [comprasPedido, setComprasPedido] = useState(() => chamadoEdicao?.dadosWorkflow?.subFluxoOficina?.pedidoCompras || chamadoEdicao?.pedido_compras || '');
   const [financeiroPrevisao, setFinanceiroPrevisao] = useState(() => chamadoEdicao?.dadosWorkflow?.subFluxoOficina?.previsaoPagamento || '');
@@ -11259,32 +11283,49 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
     }
   };
 
-  const handlePlacaChange = (val) => {
+  const handlePlacaChange = async (val) => {
     if (!val) {
       setFormData({...formData, placa: val});
       return;
     }
-    const openTicket = rawChamados?.find(c => c.placa === val && c.status !== 'RESOLVIDO' && c.status !== 'LIBERADO OPERAÇÃO');
+    const openTicket = rawChamados?.find(c => (c.placa || '').trim().toUpperCase() === val.trim().toUpperCase() && c.status !== 'RESOLVIDO' && c.status !== 'LIBERADO OPERAÇÃO');
     if (openTicket && !chamadoEdicao) {
       let legacyDefeitos = openTicket.defeitos;
+      let ticketAtualizado = { ...openTicket };
+      try {
+        const { data: ticketDb } = await supabase.from('chamados').select('*').eq('id', openTicket.id).single();
+        if (ticketDb) {
+          ticketAtualizado = { ...openTicket, ...ticketDb };
+          if (ticketDb.defeitos && Array.isArray(ticketDb.defeitos) && ticketDb.defeitos.length > 0) {
+            legacyDefeitos = ticketDb.defeitos;
+          }
+        }
+      } catch (err) {
+        console.warn('Aviso ao consultar detalhes atualizados do chamado ativo:', err);
+      }
+
       if (!legacyDefeitos || legacyDefeitos.length === 0) {
-        if (openTicket.defeitoPrincipal || openTicket.defeitoEncontrado) {
+        if (ticketAtualizado.defeitoPrincipal || ticketAtualizado.defeitoEncontrado) {
           legacyDefeitos = [{
-            id: Date.now(),
-            descricao: openTicket.defeitoEncontrado || 'Sem descrição',
-            categoria: openTicket.defeitoPrincipal || 'Outros',
+            id: ticketAtualizado.id || Date.now(),
+            descricao: ticketAtualizado.defeitoEncontrado || 'Sem descrição',
+            categoria: ticketAtualizado.defeitoPrincipal || 'Outros',
             isImpeditivo: true,
             status: 'PENDENTE',
-            numeroSolicitacao: openTicket.numero || ''
+            numeroSolicitacao: ticketAtualizado.numero || ''
           }];
         }
       }
       
-      setDuplicidadeChamado({ ...openTicket, defeitos: legacyDefeitos || [] });
+      setDuplicidadeChamado({ ...ticketAtualizado, defeitos: legacyDefeitos || [] });
       setModalDuplicidadeStep(1);
       setEscalonamentoMotivo('');
       setNovoDefeitoDescricao('');
       setNovoDefeitoCategoria('');
+      setNovoDefeitoECar('');
+      setNovoDefeitoFoto(null);
+      setDuplicidadeFotoVeiculo(null);
+      setDuplicidadeFotoHodometro(null);
     } else {
       setFormData({...formData, placa: val});
     }
@@ -11458,6 +11499,61 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
     let newLog = null;
 
     if (actionType === 'ADICIONAR') {
+      if (!novoDefeitoCategoria || !novoDefeitoDescricao || !novoDefeitoECar) {
+        alert('Por favor, preencha a Categoria, Descrição e o Nº SOL (E-CAR) do defeito.');
+        return;
+      }
+      if (!novoDefeitoFoto) {
+        alert('A foto do defeito é obrigatória!');
+        return;
+      }
+
+      // 1. Buscar defeitos mais recentes do banco diretamente para NUNCA sobrescrever defeitos existentes
+      let liveDefeitos = updatedChamado.defeitos || [];
+      let liveWorkflow = updatedChamado.dadosWorkflow || {};
+      try {
+        const { data: dbData } = await supabase
+          .from('chamados')
+          .select('id,defeitos,dadosWorkflow,etapaWorkflow,status,situacaoVeiculo')
+          .eq('id', updatedChamado.id)
+          .single();
+        if (dbData) {
+          if (Array.isArray(dbData.defeitos) && dbData.defeitos.length > 0) {
+            liveDefeitos = dbData.defeitos;
+          }
+          if (dbData.dadosWorkflow) {
+            liveWorkflow = { ...liveWorkflow, ...dbData.dadosWorkflow };
+          }
+          if (dbData.etapaWorkflow) updatedChamado.etapaWorkflow = dbData.etapaWorkflow;
+          if (dbData.status) updatedChamado.status = dbData.status;
+          if (dbData.situacaoVeiculo) updatedChamado.situacaoVeiculo = dbData.situacaoVeiculo;
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar banco em duplicidadeAction:', err);
+      }
+
+      const temFotoVeiculo = Boolean(
+        updatedChamado.fotoVeiculo || 
+        updatedChamado.dadosWorkflow?.fotosChamado?.veiculo || 
+        updatedChamado.dadosWorkflow?.fotosChamado?.fotoVeiculo ||
+        liveWorkflow?.fotosChamado?.veiculo || 
+        liveWorkflow?.fotosChamado?.fotoVeiculo ||
+        duplicidadeFotoVeiculo
+      );
+      const temFotoHodometro = Boolean(
+        updatedChamado.fotoHodometro || 
+        updatedChamado.dadosWorkflow?.fotosChamado?.hodometro || 
+        updatedChamado.dadosWorkflow?.fotosChamado?.fotoHodometro || 
+        liveWorkflow?.fotosChamado?.hodometro || 
+        liveWorkflow?.fotosChamado?.fotoHodometro || 
+        duplicidadeFotoHodometro
+      );
+
+      if (!temFotoVeiculo || !temFotoHodometro) {
+        alert('As fotos da frente do veículo e do hodômetro são obrigatórias para dar andamento ao chamado!');
+        return;
+      }
+
       const novoDef = {
         id: Date.now() + Math.random(),
         categoria: novoDefeitoCategoria,
@@ -11467,7 +11563,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
         numeroSolicitacao: novoDefeitoECar,
         fotoDefeito: novoDefeitoFoto
       };
-      updatedChamado.defeitos = [...(updatedChamado.defeitos || []), novoDef];
+      updatedChamado.defeitos = [...liveDefeitos, novoDef];
 
       // Se o chamado já estava em etapas de liberação ou concluído, ele DEVE regredir para 'Análise Frota'
       // pois uma nova avaria impeditiva foi adicionada e o veículo não pode permanecer como Liberado!
@@ -11549,15 +11645,22 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
       updatedChamado.alertas = [...(updatedChamado.alertas || []), newAlerta];
     }
 
-    if (formData.fotosChamado || formData.dadosWorkflow?.fotosChamado) {
-      const fotosParaGravar = formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {};
-      updatedChamado.dadosWorkflow = {
-        ...(updatedChamado.dadosWorkflow || {}),
-        fotosChamado: {
-          ...(updatedChamado.dadosWorkflow?.fotosChamado || {}),
-          ...fotosParaGravar
-        }
-      };
+    const fotosParaGravar = {
+      ...(updatedChamado.dadosWorkflow?.fotosChamado || {}),
+      ...(formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {}),
+      ...(duplicidadeFotoVeiculo ? { veiculo: duplicidadeFotoVeiculo, fotoVeiculo: duplicidadeFotoVeiculo } : {}),
+      ...(duplicidadeFotoHodometro ? { hodometro: duplicidadeFotoHodometro, fotoHodometro: duplicidadeFotoHodometro } : {})
+    };
+
+    updatedChamado.dadosWorkflow = {
+      ...(updatedChamado.dadosWorkflow || {}),
+      fotosChamado: fotosParaGravar
+    };
+    if (duplicidadeFotoVeiculo) {
+      updatedChamado.fotoVeiculo = duplicidadeFotoVeiculo;
+    }
+    if (duplicidadeFotoHodometro) {
+      updatedChamado.fotoHodometro = duplicidadeFotoHodometro;
     }
 
     updatedChamado.silentSave = true; 
@@ -11566,6 +11669,12 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
     }
     
     setDuplicidadeChamado(null);
+    setNovoDefeitoDescricao('');
+    setNovoDefeitoCategoria('');
+    setNovoDefeitoECar('');
+    setNovoDefeitoFoto(null);
+    setDuplicidadeFotoVeiculo(null);
+    setDuplicidadeFotoHodometro(null);
     onClose();
   };
 
@@ -11573,8 +11682,8 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
     <>
     {duplicidadeChamado && (
       <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-        <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col">
-           <div className="p-6 bg-rose-50 border-b border-rose-100 flex items-start gap-4">
+        <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
+           <div className="p-6 bg-rose-50 border-b border-rose-100 flex items-start gap-4 shrink-0">
               <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm shrink-0">
                  <AlertOctagon className="text-rose-600" size={24}/>
               </div>
@@ -11587,28 +11696,64 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
               </div>
            </div>
            
-           <div className="p-6 flex-1 overflow-y-auto bg-slate-50">
+           <div className="p-6 flex-1 overflow-y-auto bg-slate-50 space-y-4">
               {modalDuplicidadeStep === 1 && (
                  <div className="space-y-4">
-                    <p className="text-sm font-bold text-slate-500">Defeitos já registrados neste chamado:</p>
-                    <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-black text-slate-700">Defeitos já registrados no chamado:</p>
+                      <span className="text-xs font-black bg-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full">
+                        {(duplicidadeChamado.defeitos || []).length} defeito(s)
+                      </span>
+                    </div>
+                    <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
                       {(duplicidadeChamado.defeitos || []).map((def, idx) => (
-                         <div key={idx} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-1">
-                            <div className="flex justify-between items-center">
-                               <span className="text-xs font-black text-slate-400">DEFEITO #{idx+1}</span>
-                               <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${def.status === 'RESOLVIDO' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{def.status}</span>
+                         <div key={def.id || idx} className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center font-black text-xs text-slate-600 shrink-0 mt-0.5">
+                              #{idx+1}
                             </div>
-                            <p className="text-sm font-bold text-slate-700">{def.descricao}</p>
+                            <div className="flex-1 min-w-0">
+                               <div className="flex justify-between items-center mb-1">
+                                  <span className="text-[10px] font-black uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{def.categoria || 'Geral'}</span>
+                                  <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${def.status === 'RESOLVIDO' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{def.status || 'PENDENTE'}</span>
+                               </div>
+                               <p className="text-sm font-bold text-slate-800 leading-snug">{def.descricao}</p>
+                               {def.numeroSolicitacao && (
+                                 <span className="text-[10px] font-mono font-bold text-blue-600 mt-1 inline-block">SOL: {def.numeroSolicitacao}</span>
+                               )}
+                            </div>
+                            {def.fotoDefeito && (
+                               <img 
+                                 src={def.fotoDefeito} 
+                                 alt={`Defeito #${idx+1}`} 
+                                 className="w-12 h-12 object-cover rounded-xl border border-slate-200 cursor-zoom-in shrink-0 hover:opacity-90 transition-opacity" 
+                                 onClick={() => setSelectedImagePreview({ url: def.fotoDefeito, label: `Defeito #${idx+1} - ${def.descricao}` })} 
+                                 title="Clique para ampliar"
+                               />
+                            )}
                          </div>
                       ))}
                     </div>
                  </div>
               )}
-              {modalDuplicidadeStep === 2 && (
+              {modalDuplicidadeStep === 2 && (() => {
+                 const temFotoVeiculoCadastrada = Boolean(
+                   duplicidadeChamado?.fotoVeiculo || 
+                   duplicidadeChamado?.dadosWorkflow?.fotosChamado?.veiculo || 
+                   duplicidadeChamado?.dadosWorkflow?.fotosChamado?.fotoVeiculo || 
+                   duplicidadeFotoVeiculo
+                 );
+                 const temFotoHodometroCadastrada = Boolean(
+                   duplicidadeChamado?.fotoHodometro || 
+                   duplicidadeChamado?.dadosWorkflow?.fotosChamado?.hodometro || 
+                   duplicidadeChamado?.dadosWorkflow?.fotosChamado?.fotoHodometro || 
+                   duplicidadeFotoHodometro
+                 );
+
+                 return (
                  <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-                    <p className="text-sm font-bold text-slate-700">Descreva o novo defeito a ser adicionado neste chamado:</p>
+                    <p className="text-sm font-bold text-slate-700">Preencha as informações do novo defeito impeditivo:</p>
                     <div>
-                      <label className="text-xs font-bold text-slate-400 uppercase">Categoria</label>
+                      <label className="text-xs font-bold text-slate-400 uppercase">Categoria *</label>
                       <select className="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500 mt-1" value={novoDefeitoCategoria} onChange={e => setNovoDefeitoCategoria(e.target.value)}>
                         <option value="">Selecione...</option>
                         <option value="Mecânico">Mecânico</option>
@@ -11622,55 +11767,140 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-400 uppercase">Nº SOL (E-CAR)</label>
+                      <label className="text-xs font-bold text-slate-400 uppercase">Nº SOL (E-CAR) *</label>
                       <input className="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500 mt-1" placeholder="Número da solicitação E-CAR..." value={novoDefeitoECar} onChange={e => setNovoDefeitoECar(e.target.value)} />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-400 uppercase">Descrição do Defeito</label>
-                      <textarea className="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500 mt-1 h-24 resize-none" placeholder="Detalhes do problema..." value={novoDefeitoDescricao} onChange={e => setNovoDefeitoDescricao(e.target.value)} />
+                      <label className="text-xs font-bold text-slate-400 uppercase">Descrição do Defeito *</label>
+                      <textarea className="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500 mt-1 h-20 resize-none" placeholder="Detalhes do problema..." value={novoDefeitoDescricao} onChange={e => setNovoDefeitoDescricao(e.target.value)} />
                     </div>
+
+                    {/* Foto da Frente do Veículo (se não constar no chamado anterior) */}
+                    {!temFotoVeiculoCadastrada && (
+                      <div className="p-3.5 bg-rose-50/70 border border-rose-200 rounded-2xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Camera size={16} className="text-rose-600" />
+                            <span className="text-xs font-black text-rose-950 uppercase">Foto da Frente do Veículo</span>
+                          </div>
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-200 text-rose-800">Obrigatório *</span>
+                        </div>
+                        <p className="text-[11px] text-rose-700/80 font-bold">O chamado anterior não possui foto da frente do veículo. Anexe para cumprir a regra operacional:</p>
+                        {duplicidadeFotoVeiculo ? (
+                          <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-rose-200">
+                            <div className="flex items-center gap-2.5">
+                              <img src={duplicidadeFotoVeiculo} alt="Frente Veículo" className="w-12 h-12 object-cover rounded-lg border border-slate-200 cursor-zoom-in" onClick={() => setSelectedImagePreview({ url: duplicidadeFotoVeiculo, label: 'Frente do Veículo' })} />
+                              <span className="text-xs font-bold text-emerald-700">Foto Anexada</span>
+                            </div>
+                            <button type="button" onClick={() => setDuplicidadeFotoVeiculo(null)} className="p-2 bg-rose-100 text-rose-600 hover:bg-rose-200 rounded-lg text-xs font-bold transition-colors">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <button type="button" onClick={async () => { const f = await capturePhotoUnified('camera'); if (f) setDuplicidadeFotoVeiculo(f); }} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm">
+                              <Camera size={14} /> Tirar Foto
+                            </button>
+                            <button type="button" onClick={async () => { const f = await capturePhotoUnified('photos'); if (f) setDuplicidadeFotoVeiculo(f); }} className="flex-1 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm">
+                              <ImageIcon size={14} /> Galeria
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Foto do Hodômetro (se não constar no chamado anterior) */}
+                    {!temFotoHodometroCadastrada && (
+                      <div className="p-3.5 bg-rose-50/70 border border-rose-200 rounded-2xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Camera size={16} className="text-rose-600" />
+                            <span className="text-xs font-black text-rose-950 uppercase">Foto do Painel / Hodômetro</span>
+                          </div>
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-200 text-rose-800">Obrigatório *</span>
+                        </div>
+                        <p className="text-[11px] text-rose-700/80 font-bold">O chamado anterior não possui foto do hodômetro. Anexe para cumprir a regra operacional:</p>
+                        {duplicidadeFotoHodometro ? (
+                          <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-rose-200">
+                            <div className="flex items-center gap-2.5">
+                              <img src={duplicidadeFotoHodometro} alt="Painel / Hodômetro" className="w-12 h-12 object-cover rounded-lg border border-slate-200 cursor-zoom-in" onClick={() => setSelectedImagePreview({ url: duplicidadeFotoHodometro, label: 'Painel / Hodômetro' })} />
+                              <span className="text-xs font-bold text-emerald-700">Foto Anexada</span>
+                            </div>
+                            <button type="button" onClick={() => setDuplicidadeFotoHodometro(null)} className="p-2 bg-rose-100 text-rose-600 hover:bg-rose-200 rounded-lg text-xs font-bold transition-colors">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <button type="button" onClick={async () => { const f = await capturePhotoUnified('camera'); if (f) setDuplicidadeFotoHodometro(f); }} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm">
+                              <Camera size={14} /> Tirar Foto
+                            </button>
+                            <button type="button" onClick={async () => { const f = await capturePhotoUnified('photos'); if (f) setDuplicidadeFotoHodometro(f); }} className="flex-1 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm">
+                              <ImageIcon size={14} /> Galeria
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Foto do Novo Defeito */}
                     <div>
-                      <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Foto do Defeito (Inicialmente Opcional)</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-slate-600 uppercase">Foto do Novo Defeito <span className="text-rose-600">*</span></label>
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">Obrigatório *</span>
+                      </div>
                       {novoDefeitoFoto ? (
-                        <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm">
+                        <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-emerald-200 shadow-sm">
                           <div className="flex items-center gap-3">
-                            <img src={novoDefeitoFoto} alt="Foto do Defeito" className="w-12 h-12 object-cover rounded-lg border border-slate-200" />
-                            <span className="text-xs font-bold text-emerald-700">Foto Anexada com Sucesso</span>
+                            <img 
+                              src={novoDefeitoFoto} 
+                              alt="Foto do Defeito" 
+                              className="w-12 h-12 object-cover rounded-lg border border-slate-200 cursor-zoom-in hover:opacity-90 transition-opacity" 
+                              onClick={() => setSelectedImagePreview({ url: novoDefeitoFoto, label: 'Foto do Novo Defeito' })}
+                              title="Clique para ampliar"
+                            />
+                            <div>
+                              <span className="text-xs font-black text-emerald-700 block">Foto Anexada</span>
+                              <span className="text-[10px] text-slate-400 font-medium">Toque para ampliar</span>
+                            </div>
                           </div>
                           <button
                             type="button"
                             onClick={() => setNovoDefeitoFoto(null)}
                             className="p-2 bg-rose-100 text-rose-600 hover:bg-rose-200 rounded-lg text-xs font-bold transition-colors"
+                            title="Remover foto"
                           >
                             <Trash2 size={14} />
                           </button>
                         </div>
                       ) : (
-                        <label className="w-full p-3.5 bg-slate-50 hover:bg-blue-50/50 border-2 border-dashed border-slate-200 hover:border-blue-400 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors text-slate-600 font-bold text-xs">
-                          <Camera size={18} className="text-blue-500" /> Anexar Foto do Defeito
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={async (e) => {
-                              const file = e.target.files[0];
-                              if (file) {
-                                try {
-                                  const compressed = await compressImageToDataUrl(file);
-                                  setNovoDefeitoFoto(compressed);
-                                } catch (err) {
-                                  const reader = new FileReader();
-                                  reader.onloadend = () => setNovoDefeitoFoto(reader.result);
-                                  reader.readAsDataURL(file);
-                                }
-                              }
-                            }}
-                          />
-                        </label>
+                        <div className="flex gap-2">
+                          <button 
+                            type="button" 
+                            onClick={async () => { 
+                              const f = await capturePhotoUnified('camera'); 
+                              if (f) setNovoDefeitoFoto(f); 
+                            }} 
+                            className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all"
+                          >
+                            <Camera size={16} /> Tirar Foto
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={async () => { 
+                              const f = await capturePhotoUnified('photos'); 
+                              if (f) setNovoDefeitoFoto(f); 
+                            }} 
+                            className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-slate-200 transition-all"
+                          >
+                            <ImageIcon size={16} /> Galeria
+                          </button>
+                        </div>
                       )}
                     </div>
                  </div>
-              )}
+                 );
+              })()}
               {modalDuplicidadeStep === 3 && (
                  <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                     <p className="text-sm font-bold text-slate-700">Informe o motivo para escalonar este chamado:</p>
@@ -11679,7 +11909,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
               )}
            </div>
 
-           <div className="p-4 bg-white border-t border-slate-100">
+           <div className="p-4 bg-white border-t border-slate-100 shrink-0">
               {modalDuplicidadeStep === 1 ? (
                  <div className="flex flex-col gap-2">
                     <button onClick={() => setModalDuplicidadeStep(2)} className="w-full py-3.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-xl font-black text-sm transition-colors">
@@ -11697,11 +11927,27 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                     <button onClick={() => setModalDuplicidadeStep(1)} className="flex-1 py-3 text-slate-500 hover:bg-slate-50 rounded-xl font-bold text-sm transition-colors">
                        Voltar
                     </button>
-                    {modalDuplicidadeStep === 2 ? (
-                       <button onClick={() => handleDuplicidadeAction('ADICIONAR')} disabled={!novoDefeitoCategoria || !novoDefeitoDescricao || !novoDefeitoECar} className="flex-1 py-3 bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-black text-sm transition-colors shadow-md shadow-emerald-600/20">
+                    {modalDuplicidadeStep === 2 ? (() => {
+                       const temFotoVeiculoCadastrada = Boolean(
+                         duplicidadeChamado?.fotoVeiculo || 
+                         duplicidadeChamado?.dadosWorkflow?.fotosChamado?.veiculo || 
+                         duplicidadeChamado?.dadosWorkflow?.fotosChamado?.fotoVeiculo || 
+                         duplicidadeFotoVeiculo
+                       );
+                       const temFotoHodometroCadastrada = Boolean(
+                         duplicidadeChamado?.fotoHodometro || 
+                         duplicidadeChamado?.dadosWorkflow?.fotosChamado?.hodometro || 
+                         duplicidadeChamado?.dadosWorkflow?.fotosChamado?.fotoHodometro || 
+                         duplicidadeFotoHodometro
+                       );
+                       const canConfirm = novoDefeitoCategoria && novoDefeitoDescricao && novoDefeitoECar && novoDefeitoFoto && temFotoVeiculoCadastrada && temFotoHodometroCadastrada;
+
+                       return (
+                       <button onClick={() => handleDuplicidadeAction('ADICIONAR')} disabled={!canConfirm} className="flex-1 py-3 bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-black text-sm transition-colors shadow-md shadow-emerald-600/20">
                           Confirmar Defeito
                        </button>
-                    ) : (
+                       );
+                    })() : (
                        <button onClick={() => handleDuplicidadeAction('ESCALONAR')} disabled={!escalonamentoMotivo} className="flex-1 py-3 bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-black text-sm transition-colors shadow-md shadow-rose-600/20">
                           Confirmar Escalonamento
                        </button>
@@ -11794,15 +12040,15 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
               </div>
             </div>
 
-            {/* Banner de Aviso Amigável sobre Fotos Futuras */}
-            <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/40 border border-amber-200/80 dark:border-amber-800/60 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
-              <div className="p-2 bg-amber-500 text-white rounded-xl shrink-0 shadow-md">
-                <AlertTriangle size={20} />
+            {/* Banner de Conformidade sobre Fotos Obrigatórias */}
+            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/40 border border-emerald-200/80 dark:border-emerald-800/60 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+              <div className="p-2 bg-emerald-600 text-white rounded-xl shrink-0 shadow-md">
+                <ShieldCheck size={20} />
               </div>
               <div className="text-left">
-                <h5 className="text-xs font-black text-amber-900 dark:text-amber-300 uppercase tracking-wider">Aviso Importante sobre Anexo de Fotos</h5>
-                <p className="text-xs text-amber-800 dark:text-amber-400 font-bold mt-0.5 leading-relaxed">
-                  Atenção: As fotos inicialmente não são obrigatórias, mas futuramente sim, então se prepare!
+                <h5 className="text-xs font-black text-emerald-900 dark:text-emerald-300 uppercase tracking-wider">Evidências Registradas com Sucesso</h5>
+                <p className="text-xs text-emerald-800 dark:text-emerald-400 font-bold mt-0.5 leading-relaxed">
+                  As fotos obrigatórias do veículo, hodômetro e defeitos foram vinculadas para auditoria e controle operacional.
                 </p>
               </div>
             </div>
@@ -12022,7 +12268,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
 
           <form id="chamadoForm" onSubmit={e => {
             e.preventDefault();
-            (() => {
+            (async () => {
               if (!formData.placa) {
                 return showFeedbackLocal('warning', 'Placa Obrigatória', 'A Placa do Veículo é obrigatória para a abertura do chamado.');
               }
@@ -12050,8 +12296,8 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
               // ★ VALIDAÇÃO OBRIGATÓRIA DE EVIDÊNCIAS FOTOGRÁFICAS NA ABERTURA
               if (!isEditing) {
                 const fotosAtuais = formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {};
-                const temFotoVeiculo = Boolean(fotosAtuais.fotoVeiculo);
-                const temFotoHodometro = Boolean(fotosAtuais.fotoHodometro);
+                const temFotoVeiculo = Boolean(fotosAtuais.fotoVeiculo || fotosAtuais.veiculo || formData.fotoVeiculo);
+                const temFotoHodometro = Boolean(fotosAtuais.fotoHodometro || fotosAtuais.hodometro || formData.fotoHodometro);
                 const defeitosFaltandoFoto = defeitosSanitizados.filter(d => !Boolean(d.fotoDefeito));
                 
                 if (!temFotoVeiculo || !temFotoHodometro || defeitosFaltandoFoto.length > 0) {
@@ -12064,24 +12310,43 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
                 const openTicket = (rawChamados || []).find(c => (c.placa || '').trim().toUpperCase() === (formData.placa || '').trim().toUpperCase() && c.status !== 'RESOLVIDO');
                 if (openTicket) {
                   let legacyDefeitos = openTicket.defeitos;
+                  let ticketAtualizado = { ...openTicket };
+                  try {
+                    const { data: ticketDb } = await supabase.from('chamados').select('*').eq('id', openTicket.id).single();
+                    if (ticketDb) {
+                      ticketAtualizado = { ...openTicket, ...ticketDb };
+                      if (ticketDb.defeitos && Array.isArray(ticketDb.defeitos) && ticketDb.defeitos.length > 0) {
+                        legacyDefeitos = ticketDb.defeitos;
+                      }
+                    }
+                  } catch (err) {
+                    console.warn('Aviso ao consultar detalhes atualizados do chamado ativo:', err);
+                  }
+
                   if (!legacyDefeitos || legacyDefeitos.length === 0) {
-                    if (openTicket.defeitoPrincipal || openTicket.defeitoEncontrado) {
+                    if (ticketAtualizado.defeitoPrincipal || ticketAtualizado.defeitoEncontrado) {
                       legacyDefeitos = [{
-                        id: Date.now(),
-                        descricao: openTicket.defeitoEncontrado || 'Sem descrição',
-                        categoria: openTicket.defeitoPrincipal || 'Outros',
+                        id: ticketAtualizado.id || Date.now(),
+                        descricao: ticketAtualizado.defeitoEncontrado || 'Sem descrição',
+                        categoria: ticketAtualizado.defeitoPrincipal || 'Outros',
                         isImpeditivo: true,
                         status: 'PENDENTE',
-                        numeroSolicitacao: openTicket.numero || ''
+                        numeroSolicitacao: ticketAtualizado.numero || ''
                       }];
                     }
                   }
-                  setDuplicidadeChamado({ ...openTicket, defeitos: legacyDefeitos || [] });
+                  setDuplicidadeChamado({ ...ticketAtualizado, defeitos: legacyDefeitos || [] });
                   setModalDuplicidadeStep(1);
                   setEscalonamentoMotivo('');
                   setNovoDefeitoDescricao(defeitosSanitizados && defeitosSanitizados[0]?.descricao || '');
                   setNovoDefeitoCategoria(defeitosSanitizados && defeitosSanitizados[0]?.categoria || '');
                   setNovoDefeitoECar(defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao || '');
+                  setNovoDefeitoFoto(defeitosSanitizados && defeitosSanitizados[0]?.fotoDefeito || null);
+                  const fotosAtuais = formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {};
+                  const fv = fotosAtuais.fotoVeiculo || fotosAtuais.veiculo || formData.fotoVeiculo;
+                  const fh = fotosAtuais.fotoHodometro || fotosAtuais.hodometro || formData.fotoHodometro;
+                  if (fv) setDuplicidadeFotoVeiculo(fv);
+                  if (fh) setDuplicidadeFotoHodometro(fh);
                   return;
                 }
               }
@@ -12089,13 +12354,24 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
               const finalMotorista = formData.motorista === 'OUTRO' ? formData.motoristaOutro : formData.motorista;
               
               const { motoristaOutro, fotosChamado, ...dadosSemCamposVirtuais } = formData;
+              const fotosAtuais = fotosChamado || formData.dadosWorkflow?.fotosChamado || {};
+              const fotoVeiculoFinal = fotosAtuais.fotoVeiculo || fotosAtuais.veiculo || formData.fotoVeiculo || null;
+              const fotoHodometroFinal = fotosAtuais.fotoHodometro || fotosAtuais.hodometro || formData.fotoHodometro || null;
 
               const submitData = {
                 ...dadosSemCamposVirtuais, 
                 defeitos: defeitosSanitizados,
+                fotoVeiculo: fotoVeiculoFinal,
+                fotoHodometro: fotoHodometroFinal,
                 dadosWorkflow: {
                   ...(formData.dadosWorkflow || {}),
-                  ...(fotosChamado ? { fotosChamado } : {})
+                  ...(fotosChamado ? { fotosChamado } : {}),
+                  fotosChamado: {
+                    ...(formData.dadosWorkflow?.fotosChamado || {}),
+                    ...(fotosChamado || {}),
+                    ...(fotoVeiculoFinal ? { veiculo: fotoVeiculoFinal, fotoVeiculo: fotoVeiculoFinal } : {}),
+                    ...(fotoHodometroFinal ? { hodometro: fotoHodometroFinal, fotoHodometro: fotoHodometroFinal } : {})
+                  }
                 },
                 motorista: finalMotorista,
                 status: 'ABERTO',
@@ -13869,6 +14145,8 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
         setFormData(prev => ({
           ...prev,
           fotosChamado: newFotos,
+          ...(key === 'fotoVeiculo' ? { fotoVeiculo: dataUrl } : {}),
+          ...(key === 'fotoHodometro' ? { fotoHodometro: dataUrl } : {}),
           dadosWorkflow: {
             ...(prev.dadosWorkflow || {}),
             fotosChamado: newFotos
@@ -13878,7 +14156,7 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
       onUpdateFotoDefeito={(defeitoId, dataUrl) => {
         updateDefeito(defeitoId, 'fotoDefeito', dataUrl);
       }}
-      onConcluirChamado={() => {
+      onConcluirChamado={async () => {
         setModalFotosObrigatoriasOpen(false);
         const defeitosSanitizados = (formData.defeitos || []).map(d => ({
           ...d,
@@ -13890,37 +14168,67 @@ function ModalChamado({ vehicles, colaboradores, chamadoEdicao, currentUser, onW
           const openTicket = (rawChamados || []).find(c => (c.placa || '').trim().toUpperCase() === (formData.placa || '').trim().toUpperCase() && c.status !== 'RESOLVIDO');
           if (openTicket) {
             let legacyDefeitos = openTicket.defeitos;
+            let ticketAtualizado = { ...openTicket };
+            try {
+              const { data: ticketDb } = await supabase.from('chamados').select('*').eq('id', openTicket.id).single();
+              if (ticketDb) {
+                ticketAtualizado = { ...openTicket, ...ticketDb };
+                if (ticketDb.defeitos && Array.isArray(ticketDb.defeitos) && ticketDb.defeitos.length > 0) {
+                  legacyDefeitos = ticketDb.defeitos;
+                }
+              }
+            } catch (err) {
+              console.warn('Aviso ao consultar detalhes atualizados do chamado ativo:', err);
+            }
+
             if (!legacyDefeitos || legacyDefeitos.length === 0) {
-              if (openTicket.defeitoPrincipal || openTicket.defeitoEncontrado) {
+              if (ticketAtualizado.defeitoPrincipal || ticketAtualizado.defeitoEncontrado) {
                 legacyDefeitos = [{
-                  id: Date.now(),
-                  descricao: openTicket.defeitoEncontrado || 'Sem descrição',
-                  categoria: openTicket.defeitoPrincipal || 'Outros',
+                  id: ticketAtualizado.id || Date.now(),
+                  descricao: ticketAtualizado.defeitoEncontrado || 'Sem descrição',
+                  categoria: ticketAtualizado.defeitoPrincipal || 'Outros',
                   isImpeditivo: true,
                   status: 'PENDENTE',
-                  numeroSolicitacao: openTicket.numero || ''
+                  numeroSolicitacao: ticketAtualizado.numero || ''
                 }];
               }
             }
-            setDuplicidadeChamado({ ...openTicket, defeitos: legacyDefeitos || [] });
+            setDuplicidadeChamado({ ...ticketAtualizado, defeitos: legacyDefeitos || [] });
             setModalDuplicidadeStep(1);
             setEscalonamentoMotivo('');
             setNovoDefeitoDescricao(defeitosSanitizados && defeitosSanitizados[0]?.descricao || '');
             setNovoDefeitoCategoria(defeitosSanitizados && defeitosSanitizados[0]?.categoria || '');
             setNovoDefeitoECar(defeitosSanitizados && defeitosSanitizados[0]?.numeroSolicitacao || '');
+            setNovoDefeitoFoto(defeitosSanitizados && defeitosSanitizados[0]?.fotoDefeito || null);
+            const fotosAtuais = formData.fotosChamado || formData.dadosWorkflow?.fotosChamado || {};
+            const fv = fotosAtuais.fotoVeiculo || fotosAtuais.veiculo || formData.fotoVeiculo;
+            const fh = fotosAtuais.fotoHodometro || fotosAtuais.hodometro || formData.fotoHodometro;
+            if (fv) setDuplicidadeFotoVeiculo(fv);
+            if (fh) setDuplicidadeFotoHodometro(fh);
             return;
           }
         }
 
         const finalMotorista = formData.motorista === 'OUTRO' ? formData.motoristaOutro : formData.motorista;
         const { motoristaOutro, fotosChamado, ...dadosSemCamposVirtuais } = formData;
+        const fotosAtuais = fotosChamado || formData.dadosWorkflow?.fotosChamado || {};
+        const fotoVeiculoFinal = fotosAtuais.fotoVeiculo || fotosAtuais.veiculo || formData.fotoVeiculo || null;
+        const fotoHodometroFinal = fotosAtuais.fotoHodometro || fotosAtuais.hodometro || formData.fotoHodometro || null;
 
         const submitData = {
           ...dadosSemCamposVirtuais, 
           defeitos: defeitosSanitizados,
+          fotoVeiculo: fotoVeiculoFinal,
+          fotoHodometro: fotoHodometroFinal,
           dadosWorkflow: {
             ...(formData.dadosWorkflow || {}),
-            ...(fotosChamado ? { fotosChamado } : {})
+            ...(fotosChamado ? { fotosChamado } : {}),
+            fotosChamado: {
+              ...(formData.dadosWorkflow?.fotosChamado || {}),
+              ...(fotosChamado || {}),
+              ...(fotoVeiculoFinal ? { veiculo: fotoVeiculoFinal, fotoVeiculo: fotoVeiculoFinal } : {}),
+              ...(fotoHodometroFinal ? { hodometro: fotoHodometroFinal, fotoHodometro: fotoHodometroFinal } : {})
+            }
           },
           motorista: finalMotorista,
           status: 'ABERTO',

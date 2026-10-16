@@ -156,14 +156,14 @@ export default function ModalConfirmacaoAbertura({ chamado, onClose }) {
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-700 dark:text-amber-300">
-                    Aviso Importante
+                    Aviso Operacional
                   </span>
                   <h4 className="text-sm font-black text-amber-950 dark:text-amber-200">
-                    Fotos Não Anexadas
+                    Fotos Não Identificadas
                   </h4>
                 </div>
                 <p className="text-xs text-amber-900/80 dark:text-amber-300/90 font-medium leading-relaxed">
-                  As fotos do defeito/veículo <strong className="font-black text-amber-950 dark:text-amber-100">não são obrigatórias no momento</strong> para abertura do chamado, mas prepare-se pois em breve passarão a ser item obrigatório em todos os preenchimentos.
+                  As fotos do defeito, frente do veículo e hodômetro são <strong className="font-black text-amber-950 dark:text-amber-100">obrigatórias</strong> para auditoria e controle de qualidade operacional da frota.
                 </p>
               </div>
             </div>

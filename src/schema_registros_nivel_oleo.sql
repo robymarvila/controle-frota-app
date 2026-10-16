@@ -15,10 +15,15 @@ CREATE TABLE IF NOT EXISTS public.registros_nivel_oleo (
   -- Hodômetro na aferição
   hodometro INTEGER NOT NULL CHECK (hodometro >= 0),
   
-  -- 3 Evidências Fotográficas Obrigatórias
+  -- 5 Evidências Fotográficas e Verificação de Arrefecimento
   foto_frente_url TEXT NOT NULL,
   foto_hodometro_url TEXT NOT NULL,
-  foto_haste_url TEXT NOT NULL,
+  foto_haste_url TEXT NOT NULL,                      -- Mantido para retrocompatibilidade
+  foto_haste_limpa_url TEXT,                        -- Foto da ponta da vareta limpa
+  foto_haste_com_oleo_url TEXT,                     -- Foto da ponta da vareta com o nível medido
+  nivel_agua VARCHAR(20) DEFAULT 'Médio',           -- 'Alto', 'Médio', 'Baixo'
+  nivel_agua_rotulo VARCHAR(30) DEFAULT 'Médio',
+  foto_reservatorio_agua_url TEXT,                  -- Foto do reservatório de expansão
   
   observacoes TEXT,
   
@@ -54,3 +59,18 @@ GRANT ALL ON TABLE public.registros_nivel_oleo TO anon, authenticated;
 
 -- Habilitar Realtime WebSocket do Supabase para a tabela
 ALTER PUBLICATION supabase_realtime ADD TABLE public.registros_nivel_oleo;
+
+-- ==============================================================================
+-- SCRIPT DE MIGRAÇÃO (PARA BASES JÁ EXISTENTES)
+-- ==============================================================================
+ALTER TABLE public.registros_nivel_oleo 
+  ADD COLUMN IF NOT EXISTS foto_haste_limpa_url TEXT,
+  ADD COLUMN IF NOT EXISTS foto_haste_com_oleo_url TEXT,
+  ADD COLUMN IF NOT EXISTS nivel_agua VARCHAR(20) DEFAULT 'Médio',
+  ADD COLUMN IF NOT EXISTS nivel_agua_rotulo VARCHAR(30) DEFAULT 'Médio',
+  ADD COLUMN IF NOT EXISTS foto_reservatorio_agua_url TEXT;
+
+UPDATE public.registros_nivel_oleo
+SET foto_haste_com_oleo_url = foto_haste_url
+WHERE foto_haste_com_oleo_url IS NULL AND foto_haste_url IS NOT NULL;
+
