@@ -1342,6 +1342,7 @@ export default function App() {
 
       // Busca otimizada e ultra rápida dos chamados gerais (colunas leves sem fotos pesadas para evitar statement timeout)
       const fieldsChamados = 'id,placa,numero,dataAbertura,dataHoraFechamento,situacaoVeiculo,oficinaExterna,status,pendencia,defeitoEncontrado,motorista,defeitoPrincipal,etapaWorkflow,naoImpeditivo,prejuizoAcumulado,oficinaDestino,regional,codigoChamado,alertas,hodometro,tipo_oficina,diagnostico_mecanico,pecas_necessarias,sub_fluxo_status,pedido_compras,data_envio_compras,observacao_compras,criado_por';
+      const wfLightFields = 'wf_timestamps:dadosWorkflow->timestamps,wf_motivoRecusa:dadosWorkflow->motivoRecusa,wf_tipoOficina:dadosWorkflow->tipoOficina,wf_subFluxoOficina:dadosWorkflow->subFluxoOficina,wf_solicitacaoLiberacao:dadosWorkflow->solicitacaoLiberacao,wf_origemRegistroOleo:dadosWorkflow->origemRegistroOleo,wf_criadoPor:dadosWorkflow->criadoPor';
       let cData = null;
       let cErr = null;
       let openChamadosExtras = new Map();
@@ -1349,13 +1350,45 @@ export default function App() {
       try {
         const [res, resOpen] = await Promise.all([
           supabase.from('chamados').select(fieldsChamados).order('id', { ascending: false }).limit(1000),
-          supabase.from('chamados').select('id, defeitos, dadosWorkflow').neq('status', 'RESOLVIDO')
+          supabase.from('chamados').select(`${fieldsChamados},${wfLightFields}`).neq('status', 'RESOLVIDO')
         ]);
-        cData = res.data;
-        cErr = res.error;
-        if (resOpen.data && Array.isArray(resOpen.data)) {
-          resOpen.data.forEach(item => {
-            openChamadosExtras.set(item.id, item);
+        cData = res.data || [];
+        cErr = res.error || resOpen.error;
+
+        const openList = resOpen.data || [];
+        if (Array.isArray(openList) && openList.length > 0) {
+          const existingIds = new Set(cData.map(item => item.id));
+          openList.forEach(item => {
+            const {
+              wf_timestamps,
+              wf_motivoRecusa,
+              wf_tipoOficina,
+              wf_subFluxoOficina,
+              wf_solicitacaoLiberacao,
+              wf_origemRegistroOleo,
+              wf_criadoPor,
+              ...lightRow
+            } = item;
+
+            const reconstructedWf = {};
+            if (wf_timestamps) reconstructedWf.timestamps = wf_timestamps;
+            if (wf_motivoRecusa) reconstructedWf.motivoRecusa = wf_motivoRecusa;
+            if (wf_tipoOficina) reconstructedWf.tipoOficina = wf_tipoOficina;
+            if (wf_subFluxoOficina) reconstructedWf.subFluxoOficina = wf_subFluxoOficina;
+            if (wf_solicitacaoLiberacao) reconstructedWf.solicitacaoLiberacao = wf_solicitacaoLiberacao;
+            if (wf_origemRegistroOleo) reconstructedWf.origemRegistroOleo = wf_origemRegistroOleo;
+            if (wf_criadoPor) reconstructedWf.criadoPor = wf_criadoPor;
+
+            openChamadosExtras.set(item.id, {
+              id: item.id,
+              dadosWorkflow: reconstructedWf
+            });
+
+            // Garante que 100% dos chamados ABERTO (mesmo anteriores aos 1.000 mais recentes) entrem na listagem
+            if (!existingIds.has(item.id)) {
+              cData.push(lightRow);
+              existingIds.add(item.id);
+            }
           });
         }
       } catch (err) {
@@ -1489,6 +1522,47 @@ export default function App() {
         });
 
         setRawChamados(mappedChamados);
+
+        // Auto-reconciliação de integridade entre veiculos e chamados abertos
+        if (vehiclesData && vehiclesData.length > 0 && openChamadosExtras.size > 0) {
+          const openByPlaca = new Map();
+          mappedChamados.forEach(c => {
+            if (c.status !== 'RESOLVIDO') {
+              const pl = (c.placa || '').trim().toUpperCase();
+              if (pl && !openByPlaca.has(pl)) openByPlaca.set(pl, c);
+            }
+          });
+
+          const reconciledVehicles = vehiclesData.map(v => {
+            const pl = (v.placa || '').trim().toUpperCase();
+            const ch = openByPlaca.get(pl);
+            let expSituacao = 'RODANDO';
+            let expStatus = 'DISPONIVEL';
+            if (ch) {
+              const etapaAtual = ch.etapaWorkflow || 'Análise Frota';
+              const sitNorm = String(ch.situacaoVeiculo || '').toUpperCase().includes('PARADO') ? 'PARADO' : 'RODANDO';
+              if (etapaAtual === 'Liberado Operação') {
+                expSituacao = 'RODANDO';
+                expStatus = 'MANUTENÇÃO';
+              } else if (etapaAtual === 'Análise Frota' || etapaAtual === 'Aguardando Manutenção') {
+                expSituacao = sitNorm;
+                expStatus = 'ANÁLISE FROTA';
+              } else if (etapaAtual === 'Oficina Interna') {
+                expSituacao = sitNorm;
+                expStatus = 'OFICINA INTERNA';
+              } else {
+                expSituacao = sitNorm;
+                expStatus = 'MANUTENÇÃO';
+              }
+            }
+            if (v.situacao !== expSituacao || v.status !== expStatus) {
+              supabase.from('veiculos').update({ situacao: expSituacao, status: expStatus }).eq('id', v.id).then(() => {}).catch(() => {});
+              return { ...v, situacao: expSituacao, status: expStatus };
+            }
+            return v;
+          });
+          setRawVehicles(reconciledVehicles);
+        }
       }
 
       if (colabData && colabData.length > 0) setRawColaboradores(colabData);
@@ -1852,12 +1926,16 @@ export default function App() {
       if (error) {
          console.error(`Error syncing ${table}:`, error);
          alert(`Erro ao salvar no banco (${table}): ` + error.message);
+         return false;
       }
+
+      return true;
 
     } catch (err) {
 
       console.error(err);
       alert('Erro inesperado de conexão com o banco.');
+      return false;
 
     }
 
@@ -2836,20 +2914,77 @@ export default function App() {
       };
 
       chamadosAtuais = [chamadoFinal, ...chamadosAtuais];
-      if (!dadosChamado.silentSave) {
-        setChamadoRecemCriado(chamadoFinal);
+    }
+
+    const chamadosAnteriores = [...rawChamados];
+    const vehiclesAnteriores = [...rawVehicles];
+
+    setRawChamados(chamadosAtuais);
+
+    // Calcula situacao e status do veículo respeitando a etapa atual do chamado
+    const calcularEstadoVeiculoPorChamado = (ch) => {
+      const etapaAtual = ch.etapaWorkflow || 'Análise Frota';
+      const sitNorm = String(ch.situacaoVeiculo || '').toUpperCase().includes('PARADO') ? 'PARADO' : 'RODANDO';
+      if (ch.status === 'RESOLVIDO' || etapaAtual === 'RESOLVIDO') {
+        return { situacao: 'RODANDO', status: 'DISPONIVEL' };
+      }
+      if (etapaAtual === 'Liberado Operação') {
+        return { situacao: 'RODANDO', status: 'MANUTENÇÃO' };
+      }
+      if (etapaAtual === 'Análise Frota' || etapaAtual === 'Aguardando Manutenção') {
+        return { situacao: sitNorm, status: 'ANÁLISE FROTA' };
+      }
+      if (etapaAtual === 'Oficina Interna') {
+        return { situacao: sitNorm, status: 'OFICINA INTERNA' };
+      }
+      return { situacao: sitNorm, status: 'MANUTENÇÃO' };
+    };
+
+    const vecAlterado = rawVehicles.find(v => v.placa === chamadoFinal.placa) || vehiclesMap.get(chamadoFinal.placa);
+    const estadoNovoVec = calcularEstadoVeiculoPorChamado(chamadoFinal);
+    const vecFinal = vecAlterado ? { ...vecAlterado, ...estadoNovoVec } : null;
+
+    // Se houve troca de placa na edição, verifica se a placa antiga ficou sem chamado aberto
+    let vecAntigoLiberado = null;
+    if (antigo && antigo.placa && antigo.placa !== chamadoFinal.placa) {
+      const outroAbertoPlacaAntiga = chamadosAtuais.some(
+        c => c.id !== chamadoFinal.id && (c.placa || '').trim().toUpperCase() === (antigo.placa || '').trim().toUpperCase() && c.status !== 'RESOLVIDO'
+      );
+      if (!outroAbertoPlacaAntiga) {
+        const vOld = rawVehicles.find(v => v.placa === antigo.placa);
+        if (vOld) {
+          vecAntigoLiberado = { ...vOld, situacao: 'RODANDO', status: 'DISPONIVEL' };
+        }
       }
     }
 
-    setRawChamados(chamadosAtuais);
-    const vecAlterado = vehiclesMap.get(dadosChamado.placa);
-    if (vecAlterado) {
-       const vecFinal = { ...vecAlterado, situacao: dadosChamado.situacaoVeiculo, status: 'ANÁLISE FROTA' };
-       setRawVehicles(rawVehicles.map(v => v.placa === dadosChamado.placa ? vecFinal : v));
-       syncToSupabase('veiculos', vecFinal);
+    if (vecFinal || vecAntigoLiberado) {
+      setRawVehicles(rawVehicles.map(v => {
+        if (vecFinal && v.placa === vecFinal.placa) return vecFinal;
+        if (vecAntigoLiberado && v.placa === vecAntigoLiberado.placa) return vecAntigoLiberado;
+        return v;
+      }));
     }
 
-    syncToSupabase('chamados', chamadoFinal).then(() => {
+    syncToSupabase('chamados', chamadoFinal).then((savedOk) => {
+      if (savedOk === false) {
+        // Rollback local se a gravação do chamado falhar no banco (evita veículo órfão PARADO sem chamado)
+        setRawChamados(chamadosAnteriores);
+        setRawVehicles(vehiclesAnteriores);
+        return;
+      }
+
+      if (vecFinal) {
+        syncToSupabase('veiculos', vecFinal);
+      }
+      if (vecAntigoLiberado) {
+        syncToSupabase('veiculos', vecAntigoLiberado);
+      }
+
+      if (!antigo && !dadosChamado.silentSave) {
+        setChamadoRecemCriado(chamadoFinal);
+      }
+
       if (!antigo && chamadoFinal && chamadoFinal.id) {
         const dataHoraLog = dadosChamado.dataAbertura ? new Date(dadosChamado.dataAbertura).toISOString() : hoje.toISOString();
         const usuarioLog = currentUser?.nome || 'Sistema';

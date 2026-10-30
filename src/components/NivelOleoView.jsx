@@ -348,7 +348,7 @@ export default function NivelOleoView({
           id: novoChamadoId,
           codigoChamado: novoChamadoCodigo,
           placa: reg.placa.toUpperCase().trim(),
-          situacaoVeiculo: 'Rodando (Operacional)',
+          situacaoVeiculo: 'RODANDO',
           hodometro: reg.hodometro,
           dataAbertura: dataHoraAberturaIso,
           regional: reg.regional || 'Norte',
