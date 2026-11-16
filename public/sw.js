@@ -1,5 +1,5 @@
 // Service Worker — Fleet Operação PWA
-const CACHE_NAME = 'fleet-op-v2.9';
+const CACHE_NAME = 'fleet-op-v3.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -13,23 +13,52 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate: Clean old caches
+// Activate: Clean old caches and notify open clients
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    ).then(() => {
+      return self.clients.claim();
+    }).then(() => {
+      return self.clients.matchAll({ type: 'window' }).then((clients) => {
+        clients.forEach((client) => {
+          client.postMessage({ type: 'SW_ACTIVATED', version: CACHE_NAME });
+        });
+      });
+    })
   );
-  self.clients.claim();
 });
 
-// Fetch: Network-first strategy (real-time data priority)
+// Fetch: Network-first strategy with cache-busting for HTML & updates
 self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
-  // For API/Supabase requests, always go to network
+  // For API/Supabase requests, always go directly to network
   if (event.request.url.includes('supabase') || event.request.url.includes('/rest/')) {
+    return;
+  }
+
+  // Never cache sw.js or version.json
+  if (event.request.url.includes('sw.js') || event.request.url.includes('version.json')) {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
+
+  // Navegação HTML (ao abrir o link ou recarregar): sempre buscar da rede com no-cache
+  if (event.request.mode === 'navigate' || event.request.destination === 'document') {
+    event.respondWith(
+      fetch(event.request, { cache: 'no-cache' })
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((res) => res || caches.match('/index.html')))
+    );
     return;
   }
 

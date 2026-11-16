@@ -879,7 +879,7 @@ export default function ChamadosView({
             )}
 
             {/* + Novo Chamado Contextual Button */}
-            {(userPermissions?.permissoes_edicao?.pode_abrir_chamado !== false) && onNovoChamado && (
+            {Boolean(userPermissions?.permissoes_edicao?.pode_abrir_chamado) && onNovoChamado && (
               <button
                 onClick={() => setShowSeletorModal(true)}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-2xl text-xs font-black transition-all shadow-md shadow-emerald-600/20 flex items-center gap-2 active:scale-95"

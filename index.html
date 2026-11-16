@@ -7,6 +7,11 @@
     <meta name="theme-color" content="#059669" />
     <meta name="description" content="Sistema de Controle Operacional de Frota — Gestão inteligente de veículos, chamados e operação" />
     
+    <!-- Anti-cache meta tags para garantir entrega atômica da versão mais recente -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
     <!-- PWA Meta Tags -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -29,13 +34,45 @@
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     
-    <!-- Service Worker Registration -->
+    <!-- Service Worker Registration com verificação e recarregamento atômico -->
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('[SW] PWA Registered successfully:', reg.scope))
+          navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+            .then(reg => {
+              console.log('[SW] PWA Registered successfully:', reg.scope);
+              // Força verificação imediata na rede
+              reg.update();
+              // Verifica atualizações quando a aba ou app ganha foco
+              document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                  reg.update();
+                }
+              });
+              window.addEventListener('focus', () => {
+                reg.update();
+              });
+            })
             .catch(err => console.warn('[SW] Registration warning:', err));
+        });
+
+        // Recarrega a página de forma atômica se um novo Service Worker assumir o controle
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (!refreshing) {
+            refreshing = true;
+            window.location.reload();
+          }
+        });
+
+        // Ouve mensagens diretas de ativação do Service Worker
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if (event.data && event.data.type === 'SW_ACTIVATED') {
+            if (!refreshing) {
+              refreshing = true;
+              window.location.reload();
+            }
+          }
         });
       }
     </script>

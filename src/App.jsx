@@ -546,7 +546,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'COORDENADOR',
     modulos_visiveis: ['inicio', 'calendario', 'dashboard', 'entrega_equipes', 'colaboradores', 'forca', 'historico', 'meu_perfil'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: true,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: true,
       pode_montar_equipe: true, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: false, pode_alterar_etapa_manual: false, forca_editar_colaborador: true, forca_editar_vagas: true,
       forca_carregar_budget: true, forca_carregar_forca_op: true, forca_formar_equipe: true
@@ -557,7 +557,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'GERENTE',
     modulos_visiveis: ['inicio', 'calendario', 'dashboard', 'entrega_equipes', 'colaboradores', 'forca', 'historico', 'meu_perfil', 'usuarios'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: true,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: true,
       pode_montar_equipe: true, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: true, pode_alterar_etapa_manual: false, forca_editar_colaborador: true, forca_editar_vagas: true,
       forca_carregar_budget: true, forca_carregar_forca_op: true, forca_formar_equipe: true
@@ -581,7 +581,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'ANALISTA',
     modulos_visiveis: ['inicio', 'dashboard', 'calendario', 'entrega_equipes', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'forca', 'meu_perfil'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: false,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: false,
       pode_montar_equipe: false, ver_producao_operacional: true, ver_indicadores_financeiros: false,
       pode_editar_acessos: false, pode_alterar_etapa_manual: false, forca_editar_colaborador: false, forca_editar_vagas: false,
       forca_carregar_budget: false, forca_carregar_forca_op: false, forca_formar_equipe: false
@@ -592,7 +592,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'SUPERVISOR',
     modulos_visiveis: ['inicio', 'dashboard', 'calendario', 'chamados', 'frota', 'entrega_equipes', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'colaboradores', 'forca', 'historico', 'meu_perfil'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: true,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: true,
       pode_montar_equipe: true, ver_producao_operacional: true, ver_indicadores_financeiros: false,
       pode_editar_acessos: false, pode_alterar_etapa_manual: true, forca_editar_colaborador: true, forca_editar_vagas: true,
       forca_carregar_budget: true, forca_carregar_forca_op: true, forca_formar_equipe: true
@@ -603,7 +603,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'COORDENADOR',
     modulos_visiveis: ['inicio', 'dashboard', 'calendario', 'chamados', 'frota', 'entrega_equipes', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'colaboradores', 'forca', 'historico', 'meu_perfil'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: true,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: true,
       pode_montar_equipe: true, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: false, pode_alterar_etapa_manual: true, forca_editar_colaborador: true, forca_editar_vagas: true,
       forca_carregar_budget: true, forca_carregar_forca_op: true, forca_formar_equipe: true
@@ -614,7 +614,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'GERENTE',
     modulos_visiveis: ['inicio', 'dashboard', 'calendario', 'chamados', 'frota', 'entrega_equipes', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'colaboradores', 'forca', 'historico', 'meu_perfil', 'usuarios'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: true,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: true,
       pode_montar_equipe: true, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: true, pode_alterar_etapa_manual: true, forca_editar_colaborador: true, forca_editar_vagas: true,
       forca_carregar_budget: true, forca_carregar_forca_op: true, forca_formar_equipe: true
@@ -638,7 +638,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'ANALISTA',
     modulos_visiveis: ['inicio', 'dashboard', 'chamados', 'frota', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'historico', 'meu_perfil', 'cadastro_oficinas'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
       pode_montar_equipe: false, ver_producao_operacional: false, ver_indicadores_financeiros: true,
       pode_editar_acessos: false, pode_alterar_etapa_manual: true, pode_concluir_chamado_oficina: true, pode_movimentar_oficinas: true,
       forca_editar_colaborador: false, forca_editar_vagas: false, forca_carregar_budget: false, forca_carregar_forca_op: false, forca_formar_equipe: false
@@ -649,7 +649,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'SUPERVISOR',
     modulos_visiveis: ['inicio', 'dashboard', 'chamados', 'frota', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'historico', 'meu_perfil', 'cadastro_oficinas'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
       pode_montar_equipe: false, ver_producao_operacional: false, ver_indicadores_financeiros: true,
       pode_editar_acessos: false, pode_alterar_etapa_manual: true, pode_concluir_chamado_oficina: true, pode_movimentar_oficinas: true,
       forca_editar_colaborador: false, forca_editar_vagas: false, forca_carregar_budget: false, forca_carregar_forca_op: false, forca_formar_equipe: false
@@ -660,7 +660,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'COORDENADOR',
     modulos_visiveis: ['inicio', 'dashboard', 'chamados', 'frota', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'historico', 'meu_perfil', 'cadastro_oficinas'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
       pode_montar_equipe: false, ver_producao_operacional: false, ver_indicadores_financeiros: true,
       pode_editar_acessos: false, pode_alterar_etapa_manual: true, pode_concluir_chamado_oficina: true, pode_movimentar_oficinas: true,
       forca_editar_colaborador: false, forca_editar_vagas: false, forca_carregar_budget: false, forca_carregar_forca_op: false, forca_formar_equipe: false
@@ -671,7 +671,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'GERENTE',
     modulos_visiveis: ['inicio', 'dashboard', 'chamados', 'frota', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'historico', 'meu_perfil', 'usuarios', 'cadastro_oficinas'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: true,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: true,
       pode_montar_equipe: true, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: true, pode_alterar_etapa_manual: true, pode_concluir_chamado_oficina: true, pode_movimentar_oficinas: true,
       forca_editar_colaborador: true, forca_editar_vagas: true, forca_carregar_budget: true, forca_carregar_forca_op: true, forca_formar_equipe: true
@@ -708,7 +708,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'ANALISTA',
     modulos_visiveis: ['inicio', 'dashboard', 'calendario', 'chamados', 'frota', 'meu_perfil'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: false,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: false,
       pode_montar_equipe: false, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: false, pode_alterar_etapa_manual: false, forca_editar_colaborador: false, forca_editar_vagas: false,
       forca_carregar_budget: false, forca_carregar_forca_op: false, forca_formar_equipe: false
@@ -719,7 +719,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'SUPERVISOR',
     modulos_visiveis: ['inicio', 'dashboard', 'calendario', 'chamados', 'frota', 'meu_perfil'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: false,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: false,
       pode_montar_equipe: false, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: false, pode_alterar_etapa_manual: false, forca_editar_colaborador: false, forca_editar_vagas: false,
       forca_carregar_budget: false, forca_carregar_forca_op: false, forca_formar_equipe: false
@@ -730,7 +730,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'GERENTE',
     modulos_visiveis: ['inicio', 'dashboard', 'calendario', 'chamados', 'frota', 'meu_perfil', 'usuarios'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
       pode_montar_equipe: false, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: true, pode_alterar_etapa_manual: false, forca_editar_colaborador: false, forca_editar_vagas: false,
       forca_carregar_budget: true, forca_carregar_forca_op: false, forca_formar_equipe: false
@@ -743,7 +743,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'SUPERVISOR',
     modulos_visiveis: ['inicio', 'dashboard', 'calendario', 'chamados', 'frota', 'ociosidade_frota', 'meu_perfil'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: false,
       pode_montar_equipe: true, ver_producao_operacional: true, ver_indicadores_financeiros: false,
       pode_editar_acessos: false, pode_alterar_etapa_manual: false, forca_editar_colaborador: false, forca_editar_vagas: false,
       forca_carregar_budget: false, forca_carregar_forca_op: false, forca_formar_equipe: false
@@ -769,7 +769,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'GERENTE',
     modulos_visiveis: ['inicio', 'calendario', 'dashboard', 'chamados', 'frota', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'entrega_equipes', 'colaboradores', 'forca', 'historico', 'meu_perfil', 'usuarios'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: true,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: true,
       pode_montar_equipe: true, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: true, pode_alterar_etapa_manual: true, forca_editar_colaborador: true, forca_editar_vagas: true,
       forca_carregar_budget: true, forca_carregar_forca_op: true, forca_formar_equipe: true
@@ -782,7 +782,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'SUPERVISOR',
     modulos_visiveis: ['inicio', 'calendario', 'dashboard', 'chamados', 'frota', 'ociosidade_frota', 'painel_tv', 'fidelizacao', 'entrega_equipes', 'colaboradores', 'forca', 'historico', 'meu_perfil', 'usuarios', 'cadastro_oficinas'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: true,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: true, pode_cadastrar_colaborador: true,
       pode_montar_equipe: true, ver_producao_operacional: true, ver_indicadores_financeiros: true,
       pode_editar_acessos: true, pode_alterar_etapa_manual: true, forca_editar_colaborador: true, forca_editar_vagas: true,
       forca_carregar_budget: true, forca_carregar_forca_op: true, forca_formar_equipe: true
@@ -795,7 +795,7 @@ const DEFAULT_CONFIG_ACESSOS = [
     perfil: 'SUPERVISOR',
     modulos_visiveis: ['inicio', 'dashboard', 'calendario', 'frota', 'chamados', 'meu_perfil'],
     permissoes_edicao: {
-      pode_abrir_chamado: true, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: false,
+      pode_abrir_chamado: false, pode_cadastrar_veiculo: false, pode_cadastrar_colaborador: false,
       pode_montar_equipe: false, ver_producao_operacional: true, ver_indicadores_financeiros: false,
       pode_editar_acessos: false, pode_alterar_etapa_manual: false, forca_editar_colaborador: false, forca_editar_vagas: false,
       forca_carregar_budget: false, forca_carregar_forca_op: false, forca_formar_equipe: false
@@ -804,6 +804,54 @@ const DEFAULT_CONFIG_ACESSOS = [
 ];
 
 export default function App() {
+
+  // Timestamp de build para controle de versão atômica do frontend
+  const APP_BUILD_TIMESTAMP = 1731780000000;
+
+  // Verificação Atômica de Atualização da Aplicação (garante que links e abas recebam a versão atual)
+  useEffect(() => {
+    const checkForAppUpdate = async () => {
+      try {
+        const res = await fetch(`/version.json?t=${Date.now()}`, {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+        });
+        if (res.ok) {
+          const remote = await res.json();
+          if (remote?.buildTime && remote.buildTime > APP_BUILD_TIMESTAMP) {
+            console.log('[Update] Nova versão detectada:', remote.version, 'Recarregando atomicamente...');
+            if ('caches' in window) {
+              const keys = await caches.keys();
+              await Promise.all(keys.map(k => caches.delete(k)));
+            }
+            try {
+              localStorage.removeItem('fleet_config_acessos_cache');
+            } catch (e) {}
+            window.location.reload();
+          }
+        }
+      } catch (err) {
+        // Silencioso se offline
+      }
+    };
+
+    checkForAppUpdate();
+    const interval = setInterval(checkForAppUpdate, 120000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkForAppUpdate();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', checkForAppUpdate);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', checkForAppUpdate);
+    };
+  }, []);
 
   // Rotina Automática de Sobras de Campo (23:59) respeitando o calendário/escala do auditor
   useEffect(() => {
@@ -1193,13 +1241,16 @@ export default function App() {
       if (modulosOperacionais.length === 0) {
         return {
           modulos_visiveis: [],
-          permissoes_edicao: matchBanco.permissoes_edicao || {},
+          permissoes_edicao: { ...(matchBanco.permissoes_edicao || {}), pode_abrir_chamado: false },
           temAcessoLiberado: false
         };
       }
       return {
         modulos_visiveis: Array.from(new Set([...modulosBanco, 'meu_perfil'])),
-        permissoes_edicao: { ...(matchBanco.permissoes_edicao || {}) },
+        permissoes_edicao: {
+          ...(matchBanco.permissoes_edicao || {}),
+          pode_abrir_chamado: false // Trava: abertura paralisada, somente ADMINISTRADOR pode abrir
+        },
         temAcessoLiberado: true
       };
     }
@@ -1216,13 +1267,16 @@ export default function App() {
       if (modulosOperacionais.length === 0) {
         return {
           modulos_visiveis: [],
-          permissoes_edicao: matchDefault.permissoes_edicao || {},
+          permissoes_edicao: { ...(matchDefault.permissoes_edicao || {}), pode_abrir_chamado: false },
           temAcessoLiberado: false
         };
       }
       return {
         modulos_visiveis: Array.from(new Set([...modulosDefault, 'meu_perfil'])),
-        permissoes_edicao: { ...matchDefault.permissoes_edicao },
+        permissoes_edicao: {
+          ...matchDefault.permissoes_edicao,
+          pode_abrir_chamado: false // Trava: abertura paralisada, somente ADMINISTRADOR pode abrir
+        },
         temAcessoLiberado: true
       };
     }
@@ -1230,7 +1284,7 @@ export default function App() {
     // 6. Caso não configurado na matriz, aguardar liberação
     return {
       modulos_visiveis: [],
-      permissoes_edicao: {},
+      permissoes_edicao: { pode_abrir_chamado: false },
       temAcessoLiberado: false
     };
   }, [currentUser, configAcessos]);
@@ -2745,6 +2799,12 @@ export default function App() {
 
 
   const handleSalvarChamado = (dadosChamado) => {
+    // Bloqueio no salvamento: impede abertura de novos chamados por perfis não-administradores
+    const isNovo = !dadosChamado.id || !rawChamados.some(c => c.id === dadosChamado.id);
+    if (isNovo && !userPermissions?.permissoes_edicao?.pode_abrir_chamado) {
+      alert("Abertura de chamados paralisada temporariamente. Apenas o Administrador pode abrir chamados.");
+      return null;
+    }
 
     let chamadoFinal;
 
@@ -3387,7 +3447,7 @@ export default function App() {
         {activeTab === 'dashboard' && <DashboardView vehicles={vehicles} chamados={chamados} rawChamados={rawChamados} hoje={hoje} currentUser={currentUser} isWelcomeModalOpen={isWelcomeModalOpen} />}
         {activeTab === 'chamados' && (
           <ErrorBoundary>
-            <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />
+            <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={userPermissions?.permissoes_edicao?.pode_abrir_chamado ? () => setIsNovoChamadoModalOpen(true) : undefined} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />
           </ErrorBoundary>
         )}
         {activeTab === 'mecanico' && <MecanicoView chamados={chamados} vehicles={vehicles} onWorkflowTransition={handleWorkflowTransition} onSubmit={handleSalvarChamado} currentUser={currentUser} listaOficinas={listaOficinasNomes} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
@@ -3445,7 +3505,7 @@ export default function App() {
         </MobileShell>
 
         {/* Modais — same for mobile and desktop */}
-        {(isNovoChamadoModalOpen || chamadoEmEdicao) && (
+        {((isNovoChamadoModalOpen && userPermissions?.permissoes_edicao?.pode_abrir_chamado) || chamadoEmEdicao) && (
           <ErrorBoundary>
             <ModalChamado vehicles={vehicles} colaboradores={colaboradores} chamadoEdicao={chamadoEmEdicao} currentUser={currentUser} onWorkflowTransition={handleWorkflowTransition} onClose={() => { setIsNovoChamadoModalOpen(false); setChamadoEmEdicao(null); }} onSubmit={handleSalvarChamado} onLiberar={(c) => { setChamadoParaLiberar(c); setChamadoEmEdicao(null); setIsNovoChamadoModalOpen(false); }} rawChamados={rawChamados} userPermissions={userPermissions} listaOficinas={listaOficinasNomes} />
           </ErrorBoundary>
@@ -3724,7 +3784,7 @@ export default function App() {
 
           {activeTab === 'chamados' && (
             <ErrorBoundary>
-              <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={() => setIsNovoChamadoModalOpen(true)} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />
+              <ChamadosView chamados={chamados} vehicles={vehicles} hoje={hoje} onEditar={setChamadoEmEdicao} onLiberar={setChamadoParaLiberar} userPermissions={userPermissions} podeFinalizar={podeFinalizarChamado} onNovoChamado={userPermissions?.permissoes_edicao?.pode_abrir_chamado ? () => setIsNovoChamadoModalOpen(true) : undefined} currentUser={currentUser} onSubmitChamado={handleSalvarChamado} />
             </ErrorBoundary>
           )}
 
@@ -3807,7 +3867,7 @@ export default function App() {
 
       {/* Modais */}
 
-      {(isNovoChamadoModalOpen || chamadoEmEdicao) && (
+      {((isNovoChamadoModalOpen && userPermissions?.permissoes_edicao?.pode_abrir_chamado) || chamadoEmEdicao) && (
         <ErrorBoundary>
           <ModalChamado vehicles={vehicles} colaboradores={colaboradores} chamadoEdicao={chamadoEmEdicao} currentUser={currentUser} onWorkflowTransition={handleWorkflowTransition} onClose={() => { setIsNovoChamadoModalOpen(false); setChamadoEmEdicao(null); }} onSubmit={handleSalvarChamado} onLiberar={(c) => { setChamadoParaLiberar(c); setChamadoEmEdicao(null); setIsNovoChamadoModalOpen(false); }} rawChamados={rawChamados} userPermissions={userPermissions} listaOficinas={listaOficinasNomes} />
         </ErrorBoundary>

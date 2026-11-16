@@ -271,6 +271,11 @@ export default function NivelOleoView({
   // Disparo da Abertura Automática do Chamado
   const handleConfirmarAbertura = async (anexarAoExistente = false) => {
     if (!registroParaAbertura) return;
+    if (!userPermissions?.permissoes_edicao?.pode_abrir_chamado) {
+      alert("Abertura de chamados paralisada temporariamente. Apenas o Administrador pode abrir chamados.");
+      setRegistroParaAbertura(null);
+      return;
+    }
 
     try {
       setProcessandoAbertura(true);
@@ -919,20 +924,22 @@ export default function NivelOleoView({
                           </span>
                         )}
 
-                        <button
-                          type="button"
-                          onClick={() => setRegistroParaAbertura(reg)}
-                          className={`px-4 py-2.5 rounded-2xl font-black text-xs text-white shadow-md transition-all flex items-center gap-1.5 active:scale-95 ${
-                            isNivel3
-                              ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/25'
-                              : isNivel2
-                                ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/25'
-                                : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
-                          }`}
-                        >
-                          <Wrench size={14} />
-                          <span>Abrir Chamado</span>
-                        </button>
+                        {Boolean(userPermissions?.permissoes_edicao?.pode_abrir_chamado) && (
+                          <button
+                            type="button"
+                            onClick={() => setRegistroParaAbertura(reg)}
+                            className={`px-4 py-2.5 rounded-2xl font-black text-xs text-white shadow-md transition-all flex items-center gap-1.5 active:scale-95 ${
+                              isNivel3
+                                ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/25'
+                                : isNivel2
+                                  ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/25'
+                                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
+                            }`}
+                          >
+                            <Wrench size={14} />
+                            <span>Abrir Chamado</span>
+                          </button>
+                        )}
                       </div>
                     )}
 
