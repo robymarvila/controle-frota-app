@@ -48,6 +48,7 @@ import MobileShell from './components/mobile/MobileShell';
 import { useDeviceDetect } from './hooks/useDeviceDetect';
 import deviceTelemetryService from './services/deviceTelemetryService';
 import ErrorBoundary from './components/ErrorBoundary';
+import TelaMigracaoBidtech from './components/TelaMigracaoBidtech';
 
 import { DollarSign, PieChart as PieChartIcon, CalendarCheck } from 'lucide-react';
 import CustomFeedbackModal from './components/CustomFeedbackModal';
@@ -806,7 +807,7 @@ const DEFAULT_CONFIG_ACESSOS = [
 export default function App() {
 
   // Timestamp de build para controle de versão atômica do frontend
-  const APP_BUILD_TIMESTAMP = 1731780000000;
+  const APP_BUILD_TIMESTAMP = 1731850000000;
 
   // Verificação Atômica de Atualização da Aplicação (garante que links e abas recebam a versão atual)
   useEffect(() => {
@@ -3364,6 +3365,17 @@ export default function App() {
     return true;
 
   };
+
+  // ==============================================================================
+  // DESATIVAÇÃO TEMPORÁRIA DO SISTEMA — MIGRAÇÃO PARA PLATAFORMA BIDTECH
+  // Bloqueia qualquer usuário de logar ou acessar o sistema, preservando 100% da
+  // estrutura existente intacta. Para reativar, basta alterar para false.
+  // ==============================================================================
+  const SISTEMA_DESATIVADO = true;
+
+  if (SISTEMA_DESATIVADO) {
+    return <TelaMigracaoBidtech theme={theme} />;
+  }
 
   // 1. Intercept render for unauthenticated users
   if (!currentUser) {

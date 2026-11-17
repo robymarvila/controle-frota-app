@@ -1,5 +1,5 @@
 // Service Worker — Fleet Operação PWA
-const CACHE_NAME = 'fleet-op-v3.0';
+const CACHE_NAME = 'fleet-op-v3.1-migracao-bidtech';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
